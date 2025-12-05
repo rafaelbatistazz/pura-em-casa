@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { cn } from '@/lib/utils';
 import { normalizePhone } from '@/lib/phoneUtils';
+import { cn, getSaoPauloTimestamp } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
