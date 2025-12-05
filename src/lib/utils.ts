@@ -5,11 +5,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Retorna ISO string padrão (UTC). 
-// Como o banco é TIMESTAMPTZ, ele aceita UTC (Z) e converte corretamente.
-// Ex: 2024-12-05T20:00:00.000Z (que é 17:00 em SP)
+// Retorna ISO string com COMPENSAÇÃO de +3h.
+// O sistema/banco está subtraindo 3h ao salvar (tratando UTC como Local ou vice-versa).
+// Então enviamos Time + 3h para que, ao subtrair, ele caia no horário real.
 export const getSaoPauloTimestamp = (): string => {
-  return new Date().toISOString();
+  const now = new Date();
+  // Adiciona 3 horas (3 * 60min * 60s * 1000ms)
+  const compensatedTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
+  return compensatedTime.toISOString();
 };
 
 // Formata data para exibição no fuso de São Paulo
