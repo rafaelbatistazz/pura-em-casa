@@ -365,12 +365,10 @@ export default function Conversas() {
     }
   }, [selectedLead]);
 
-  useEffect(() => {
-    // Small timeout to ensure DOM is updated and images/layout are stable
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }, 100);
-  }, [messages, selectedLead]); // Also scroll when changing lead
+  // Use layout effect to scroll before paint to avoid visual jump
+  useLayoutEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+  }, [messages, selectedLead]);
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
@@ -799,13 +797,13 @@ export default function Conversas() {
     const date = new Date(normalized);
     const now = new Date();
 
-    // Calculate days difference based on Sao Paulo dates
-    const spDate = new Date(date.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-    const spNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+    // Use absolute time difference in days to avoid timezone math complexity
+    const msPerDay = 86400000;
+    // Normalize both dates to midnight in local time (or consistently in one timezone) to compare "days"
+    const floorDate = new Date(date.toLocaleDateString('en-US', { timeZone: 'America/Sao_Paulo' }));
+    const floorNow = new Date(now.toLocaleDateString('en-US', { timeZone: 'America/Sao_Paulo' }));
 
-    const startOfToday = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate());
-    const startOfMessageDay = new Date(spDate.getFullYear(), spDate.getMonth(), spDate.getDate());
-    const daysDiff = Math.floor((startOfToday.getTime() - startOfMessageDay.getTime()) / 86400000);
+    const daysDiff = Math.floor((floorNow.getTime() - floorDate.getTime()) / msPerDay);
 
     // Today: show HH:MM
     if (daysDiff === 0) {
