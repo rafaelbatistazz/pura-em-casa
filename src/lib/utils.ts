@@ -5,14 +5,10 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Retorna ISO string com COMPENSAÇÃO de +3h.
-// O sistema/banco está subtraindo 3h ao salvar (tratando UTC como Local ou vice-versa).
-// Então enviamos Time + 3h para que, ao subtrair, ele caia no horário real.
+// Retorna ISO string padrão (UTC). 
+// O banco (configurado para America/Sao_Paulo) fará a gestão correta.
 export const getSaoPauloTimestamp = (): string => {
-  const now = new Date();
-  // Adiciona 3 horas (3 * 60min * 60s * 1000ms)
-  const compensatedTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
-  return compensatedTime.toISOString();
+  return new Date().toISOString();
 };
 
 // Formata data para exibição no fuso de São Paulo
