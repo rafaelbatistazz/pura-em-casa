@@ -37,12 +37,7 @@ const TIMEZONE = 'America/Sao_Paulo';
 
 // Gera timestamp no fuso horário de São Paulo (UTC-3)
 const getSaoPauloTimestamp = (): string => {
-  const now = new Date();
-  // Ajusta para UTC-3 (São Paulo)
-  const saoPauloOffset = -3 * 60; // -3 horas em minutos
-  const utcOffset = now.getTimezoneOffset(); // offset local em minutos
-  const saoPauloTime = new Date(now.getTime() + (utcOffset + saoPauloOffset) * 60 * 1000);
-  return saoPauloTime.toISOString();
+  return new Date().toISOString();
 };
 
 const statusColors: Record<LeadStatus, string> = {
