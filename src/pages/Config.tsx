@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { cn } from '@/lib/utils';
+import { cn, getSaoPauloTimestamp } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -240,7 +240,7 @@ export default function Config() {
     try {
       const { error } = await supabase
         .from('lead_distribution_config')
-        .update({ enabled, updated_at: new Date().toISOString() })
+        .update({ enabled, updated_at: getSaoPauloTimestamp() })
         .eq('id', distributionConfigId);
 
       if (error) throw error;
@@ -567,7 +567,7 @@ export default function Config() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           test: true,
-          timestamp: new Date().toISOString(),
+          timestamp: getSaoPauloTimestamp(),
           message: 'Teste de webhook do CRM',
         }),
       });

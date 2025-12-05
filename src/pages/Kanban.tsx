@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { cn } from '@/lib/utils';
+import { cn, getSaoPauloTimestamp, formatDisplayTime } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -122,16 +122,13 @@ function LeadCard({ lead, onEdit }: { lead: LeadWithUser; onEdit: (lead: LeadWit
   };
 
   const formatRelativeTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (hours < 1) return 'Agora';
-    if (hours < 24) return `${hours}h atrás`;
-    if (days === 1) return '1 dia atrás';
-    return `${days} dias atrás`;
+    return formatDisplayTime(timestamp, {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   const formatPhone = (phone: string) => {
@@ -373,7 +370,7 @@ export default function Kanban() {
           status: editLeadStatus,
           assigned_to: editLeadAssignedTo && editLeadAssignedTo !== 'none' ? editLeadAssignedTo : null,
           notes: editLeadNotes || null,
-          updated_at: new Date().toISOString(),
+          updated_at: getSaoPauloTimestamp(),
         } as never)
         .eq('id', editingLead.id);
 
@@ -445,7 +442,7 @@ export default function Kanban() {
           .from('leads')
           .update({
             status: targetColumn.id,
-            updated_at: new Date().toISOString(),
+            updated_at: getSaoPauloTimestamp(),
           } as never)
           .eq('id', activeIdStr);
 
@@ -469,7 +466,7 @@ export default function Kanban() {
           .from('leads')
           .update({
             status: overLead.status,
-            updated_at: new Date().toISOString(),
+            updated_at: getSaoPauloTimestamp(),
           } as never)
           .eq('id', activeIdStr);
 

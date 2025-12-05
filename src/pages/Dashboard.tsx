@@ -7,7 +7,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Users, UserPlus, TrendingUp, MessageSquare, CalendarIcon, ChevronDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { cn } from '@/lib/utils';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { cn, getSaoPauloTimestamp, formatDisplayTime } from '@/lib/utils';
 import { startOfDay, endOfDay, subDays, startOfMonth, endOfMonth, subMonths, startOfYear, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import type { Lead } from '@/types/database';
@@ -79,7 +80,7 @@ export default function Dashboard() {
     });
   }, [leads, dateFilter, customDateRange]);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = getSaoPauloTimestamp().split('T')[0];
   const leadsToday = leads.filter(
     (lead) => lead.created_at.split('T')[0] === today
   ).length;
@@ -95,8 +96,9 @@ export default function Dashboard() {
   const leadsByHour = Array.from({ length: 24 }, (_, i) => ({
     hour: `${i}h`,
     leads: filteredLeads.filter(
-      (lead) => new Date(lead.created_at).getHours() === i
-    ).length,
+      leads: filteredLeads.filter(
+        (lead) => parseInt(formatDisplayTime(lead.created_at, { hour: '2-digit', hour12: false })) === i
+      ).length,
   }));
 
   // Group leads by day of week
@@ -104,8 +106,24 @@ export default function Dashboard() {
   const leadsByDay = dayNames.map((day, index) => ({
     day,
     leads: filteredLeads.filter(
-      (lead) => new Date(lead.created_at).getDay() === index
-    ).length,
+      leads: filteredLeads.filter(
+        (lead) => {
+          // formatDisplayTime returns day/month/year... 
+          // We need day index 0-6. getDay() is easier but depends on locale.
+          // Let's create a date object FROM the formatted string to be safe or just use Date object forced to SP?
+          // Actually, straightforward way:
+          const spDateStr = formatDisplayTime(lead.created_at, { timeZone: 'America/Sao_Paulo' });
+          // But formatDisplayTime returns string.
+          // Let's use toLocaleString directly here for index or Date object shim.
+          // Simplest: Check if formatted date matches "Sunday", "Monday" etc? No, we have dayNames array.
+          // Let's use: new Date(lead.created_at).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Sao_Paulo' })
+          // Mapping 'Dom' etc is manual.
+
+          // Better approach matching original logic structure:
+          const dateInSP = new Date(new Date(lead.created_at).toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+          return dateInSP.getDay() === index;
+        }
+      ).length,
   }));
 
   const stats = [
