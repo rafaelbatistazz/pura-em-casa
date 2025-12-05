@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
+import { normalizePhone } from '@/lib/phoneUtils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -651,10 +652,8 @@ export default function Conversas() {
       return;
     }
 
-    let phone = newPhone.replace(/\D/g, '');
-    if (!phone.startsWith('55') && phone.length <= 11) {
-      phone = '55' + phone;
-    }
+    // Normalize phone number to prevent duplicates
+    const phone = normalizePhone(newPhone);
 
     setCreatingConversation(true);
     try {
