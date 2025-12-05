@@ -5,31 +5,11 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Gera timestamp ISO com offset explícito de São Paulo (UTC-3)
-// Independente do fuso horário da máquina do usuário
-// Retorna ISO string com offset -03:00 fixo (ex: 2024-12-05T15:00:00-03:00)
-// Garante o horário de SP independente do browser
+// Retorna ISO string padrão (UTC). 
+// Como o banco é TIMESTAMPTZ, ele aceita UTC (Z) e converte corretamente.
+// Ex: 2024-12-05T20:00:00.000Z (que é 17:00 em SP)
 export const getSaoPauloTimestamp = (): string => {
-  const now = new Date();
-
-  // 'sv-SE' é útil pois retorna sempre YYYY-MM-DD HH:mm:ss
-  const spTime = now.toLocaleString('sv-SE', {
-    timeZone: 'America/Sao_Paulo',
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  });
-
-  // sv-SE retorna "2024-12-05 15:45:00" ou similar. 
-  // O replace garante formato ISO T
-  const isoLike = spTime.replace(' ', 'T');
-
-  // Como o banco agora é TIMESTAMPTZ, devemos enviar o offset correto!
-  return `${isoLike}-03:00`;
+  return new Date().toISOString();
 };
 
 // Formata data para exibição no fuso de São Paulo
