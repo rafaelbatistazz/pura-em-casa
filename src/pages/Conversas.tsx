@@ -421,6 +421,7 @@ export default function Conversas() {
     if (!messageText && !mediaUrl) return;
     if (!selectedLead) return;
 
+    // Generate timestamp once to use for both local state and database
     const timestamp = getSaoPauloTimestamp();
 
     const tempMessage: Message = {
