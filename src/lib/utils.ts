@@ -5,10 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Retorna ISO string padrão (UTC). 
-// O banco é TIMESTAMPTZ. Enviamos UTC (Z) e ele armazena o instante absoluto.
+// Retorna ISO string com COMPENSAÇÃO de +3h.
+// Solução pragmática exigida: O sistema/banco subtrai 3h, então somamos 3h antes.
 export const getSaoPauloTimestamp = (): string => {
-  return new Date().toISOString();
+  const now = new Date();
+  // Adiciona 3 horas (3 * 60min * 60s * 1000ms)
+  const compensatedTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
+  return compensatedTime.toISOString();
 };
 
 // Formata data para exibição no fuso de São Paulo
