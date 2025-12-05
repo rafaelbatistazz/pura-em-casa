@@ -779,23 +779,30 @@ export default function Conversas() {
   };
 
   const formatRelativeTime = (timestamp: string) => {
-    if (!timestamp) return 'agora';
+    if (!timestamp) return '';
 
     const normalized = normalizeTimestamp(timestamp);
     const date = new Date(normalized);
     const now = new Date();
 
-    // Direct time difference (no timezone shift needed)
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
+    // Calculate days difference
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMessageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const daysDiff = Math.floor((startOfToday.getTime() - startOfMessageDay.getTime()) / 86400000);
 
-    if (minutes < 1) return 'agora';
-    if (minutes < 60) return `${minutes} min`;
-    if (hours < 24) return `${hours}h`;
-    if (days === 1) return 'ontem';
+    // Today: show HH:MM
+    if (daysDiff === 0) {
+      return date.toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+    }
 
+    // Yesterday: show "Ontem"
+    if (daysDiff === 1) return 'Ontem';
+
+    // Older: show dd/MM/yyyy
     return date.toLocaleDateString('pt-BR');
   };
 
