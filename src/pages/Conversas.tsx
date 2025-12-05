@@ -656,16 +656,20 @@ export default function Conversas() {
 
   const normalizeTimestamp = (timestamp: string) => {
     if (!timestamp) return new Date().toISOString();
-    // If it's already an ISO string with Z or offset, return as is
-    if (timestamp.endsWith('Z') || timestamp.includes('+') || (timestamp.includes('-') && timestamp.split('-').length > 3)) {
+
+    // Check for Z or offset (+00:00, -0300) using regex
+    // Matches Z at end, or +XX:XX, or -XX:XX, or +XXXX, or -XXXX
+    if (/[Zz]|[+-]\d{2}:?\d{2}$/.test(timestamp)) {
       return timestamp;
     }
+
     // Otherwise assume it's UTC and append Z
     return `${timestamp}Z`;
   };
 
   const formatRelativeTime = (timestamp: string) => {
-    const date = new Date(normalizeTimestamp(timestamp));
+    const normalized = normalizeTimestamp(timestamp);
+    const date = new Date(normalized);
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const minutes = Math.floor(diff / 60000);
@@ -680,7 +684,11 @@ export default function Conversas() {
   };
 
   const formatTime = (timestamp: string) => {
-    return new Date(normalizeTimestamp(timestamp)).toLocaleTimeString('pt-BR', {
+    const normalized = normalizeTimestamp(timestamp);
+    // Debug log to verify timezone handling
+    console.log(`[TimeDebug] Raw: ${timestamp} | Normalized: ${normalized}`);
+
+    return new Date(normalized).toLocaleTimeString('pt-BR', {
       hour: '2-digit',
       minute: '2-digit',
       timeZone: TIMEZONE,
