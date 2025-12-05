@@ -5,10 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Retorna ISO string padrão (UTC). 
-// O banco (configurado para America/Sao_Paulo) fará a gestão correta.
+// Retorna ISO string com COMPENSAÇÃO de +3h.
+// O banco está deslocando -3h ao salvar. Compensamos somando +3h antes.
+// Sincronizado com a lógica que funcionou no N8N.
 export const getSaoPauloTimestamp = (): string => {
-  return new Date().toISOString();
+  const now = new Date();
+  const compensatedTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
+  return compensatedTime.toISOString();
 };
 
 // Formata data para exibição no fuso de São Paulo
