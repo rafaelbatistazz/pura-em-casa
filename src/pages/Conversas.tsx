@@ -281,26 +281,33 @@ export default function Conversas() {
           console.log('Global message received:', payload); // Debug log
           const newMessage = payload.new as Message;
 
-          setLeads((prev) => prev.map(lead => {
-            if (lead.id === newMessage.lead_id) {
-              let lastMessage = newMessage.message_text;
-              if (newMessage.media_type === 'audio') lastMessage = '🎤 Áudio';
-              else if (newMessage.media_type === 'image') lastMessage = '📷 Imagem';
-              else if (newMessage.media_type === 'video') lastMessage = '🎬 Vídeo';
-              else if (newMessage.media_type === 'document') lastMessage = '📄 Documento';
+          setLeads((prev) => {
+            const updated = prev.map(lead => {
+              if (lead.id === newMessage.lead_id) {
+                let lastMessage = newMessage.message_text;
+                if (newMessage.media_type === 'audio') lastMessage = '🎤 Áudio';
+                else if (newMessage.media_type === 'image') lastMessage = '📷 Imagem';
+                else if (newMessage.media_type === 'video') lastMessage = '🎬 Vídeo';
+                else if (newMessage.media_type === 'document') lastMessage = '📄 Documento';
 
-              return {
-                ...lead,
-                last_message: lastMessage,
-                last_message_time: newMessage.timestamp,
-                unread_count: newMessage.direction === 'inbound' && !newMessage.read
-                  ? (lead.unread_count || 0) + 1
-                  : lead.unread_count,
-                updated_at: newMessage.timestamp
-              };
-            }
-            return lead;
-          }));
+                return {
+                  ...lead,
+                  last_message: lastMessage,
+                  last_message_time: newMessage.timestamp,
+                  unread_count: newMessage.direction === 'inbound' && !newMessage.read
+                    ? (lead.unread_count || 0) + 1
+                    : lead.unread_count,
+                  updated_at: newMessage.timestamp
+                };
+              }
+              return lead;
+            });
+
+            // Re-sort to put newest conversations first
+            return updated.sort((a, b) =>
+              new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+            );
+          });
         }
       )
       .subscribe((status) => {
