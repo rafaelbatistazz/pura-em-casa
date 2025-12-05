@@ -80,7 +80,7 @@ export default function Login() {
             />
           </div>
           <h1 className="text-2xl font-bold text-foreground">Carlos Rodeiro CRM</h1>
-          <p className="text-muted-foreground">Gestão de Atendimentos <span className="text-xs text-red-500">(v6.0-PATCH)</span></p>
+          <p className="text-muted-foreground">Gestão de Atendimentos <span className="text-xs text-blue-500">(v7.0-EXPLICIT)</span></p>
         </div>
 
         <Card className="border-border/50 shadow-xl">

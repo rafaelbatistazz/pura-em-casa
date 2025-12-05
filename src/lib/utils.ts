@@ -5,14 +5,21 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Retorna ISO string com COMPENSAÇÃO de +3h.
-// O banco/driver está subtraindo 3h (tratando input como Local quando deveria ser UTC ou vice-versa).
-// Solução Pragmática: Somamos 3h aqui para anular a subtração lá.
+// Retorna string exata no formato ISO com offset DE SÃO PAULO.
+// Ex: "2024-12-05T19:30:00.000-03:00"
+// Isso elimina ambiguidade do 'Z' e garante que o banco (TIMESTAMPTZ) entenda o offset.
 export const getSaoPauloTimestamp = (): string => {
   const now = new Date();
-  // Adiciona 3 horas (3 * 60min * 60s * 1000ms)
-  const compensatedTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
-  return compensatedTime.toISOString();
+
+  // Obtém os componentes visuais da hora de SP
+  const spString = now.toLocaleString('sv-SE', {
+    timeZone: 'America/Sao_Paulo',
+    hour12: false
+  });
+  // spString é "2024-12-05 19:30:00"
+
+  const isoLike = spString.replace(' ', 'T');
+  return `${isoLike}.000-03:00`;
 };
 
 // Formata data para exibição no fuso de São Paulo
