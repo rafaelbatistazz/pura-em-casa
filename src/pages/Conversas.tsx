@@ -670,12 +670,10 @@ export default function Conversas() {
   const formatRelativeTime = (timestamp: string) => {
     const normalized = normalizeTimestamp(timestamp);
     const date = new Date(normalized);
-
-    // FORCE SUBTRACT 3 HOURS for display
-    date.setHours(date.getHours() - 3);
-
     const now = new Date();
-    // Adjust 'now' to match the shifted time for relative calc
+
+    // Adjust 'now' to match the shifted time (since DB is -3h)
+    // We need to compare "DB Time" (Fake UTC) with "Now UTC - 3h"
     const nowShifted = new Date(now);
     nowShifted.setHours(nowShifted.getHours() - 3);
 
@@ -689,7 +687,7 @@ export default function Conversas() {
     if (hours < 24) return `${hours}h`;
     if (days === 1) return 'ontem';
 
-    // Use 'UTC' timezone to prevent double shift since we manually shifted
+    // Use 'UTC' timezone to display the stored time as is
     return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
   };
 
@@ -697,13 +695,10 @@ export default function Conversas() {
     const normalized = normalizeTimestamp(timestamp);
     const date = new Date(normalized);
 
-    // FORCE SUBTRACT 3 HOURS for display
-    date.setHours(date.getHours() - 3);
-
     // Debug log to verify timezone handling
-    console.log(`[TimeDebug] Raw: ${timestamp} | Normalized: ${normalized} | Shifted: ${date.toISOString()}`);
+    console.log(`[TimeDebug] Raw: ${timestamp} | Normalized: ${normalized} | Date: ${date.toISOString()}`);
 
-    // Use 'UTC' timezone to prevent double shift since we manually shifted
+    // Use 'UTC' timezone to display the stored time as is
     return date.toLocaleTimeString('pt-BR', {
       hour: '2-digit',
       minute: '2-digit',

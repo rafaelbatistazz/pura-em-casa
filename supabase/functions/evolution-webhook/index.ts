@@ -18,7 +18,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body = await req.json();
-    
+
     console.log('=== Evolution Webhook Received ===');
     console.log('Event:', body.event);
     console.log('Instance:', body.instance);
@@ -27,7 +27,7 @@ serve(async (req) => {
     // Handle messages.upsert event (new messages)
     if (body.event === 'messages.upsert') {
       const data = body.data;
-      
+
       if (!data || !data.key) {
         console.log('No message data found');
         return new Response(
@@ -39,7 +39,7 @@ serve(async (req) => {
       // Extract phone number (remove @s.whatsapp.net or @g.us)
       const remoteJid = data.key.remoteJid || '';
       const phone = remoteJid.replace(/@s\.whatsapp\.net|@g\.us/g, '');
-      
+
       // Skip group messages for now
       if (remoteJid.includes('@g.us')) {
         console.log('Skipping group message');
@@ -60,19 +60,19 @@ serve(async (req) => {
 
       // Get contact name
       const pushName = data.pushName || phone;
-      
+
       // Determine message direction
       const direction = data.key.fromMe ? 'outbound' : 'inbound';
-      
+
       // Extract message text and media info (handle different message types)
       let messageText = '';
       let mediaType: string | null = null;
       const message = data.message;
-      
+
       // Check if n8n sent media_url and media_type
       const mediaUrlFromN8n = data.media_url || null;
       const mediaTypeFromN8n = data.media_type || null;
-      
+
       if (message) {
         if (message.conversation) {
           messageText = message.conversation;
@@ -107,9 +107,10 @@ serve(async (req) => {
       const finalMediaType = mediaTypeFromN8n || mediaType;
 
       // Get message timestamp (Evolution sends in seconds)
-      const messageTimestamp = data.messageTimestamp 
-        ? new Date(data.messageTimestamp * 1000).toISOString()
-        : new Date().toISOString();
+      // FORCE SUBTRACT 3 HOURS to match Brazil time in DB
+      const timestampMs = data.messageTimestamp ? data.messageTimestamp * 1000 : Date.now();
+      const brazilOffset = 3 * 60 * 60 * 1000;
+      const messageTimestamp = new Date(timestampMs - brazilOffset).toISOString();
 
       // Get message ID
       const messageId = data.key.id || `msg-${Date.now()}`;
@@ -181,10 +182,10 @@ serve(async (req) => {
       console.log('Message inserted successfully with media:', { mediaUrl: finalMediaUrl, mediaType: finalMediaType });
 
       return new Response(
-        JSON.stringify({ 
-          success: true, 
-          leadId, 
-          message: 'Message processed successfully' 
+        JSON.stringify({
+          success: true,
+          leadId,
+          message: 'Message processed successfully'
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -192,7 +193,7 @@ serve(async (req) => {
 
     // Handle other events (connection status, etc.)
     console.log('Unhandled event type:', body.event);
-    
+
     return new Response(
       JSON.stringify({ success: true, message: 'Event received' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -203,9 +204,9 @@ serve(async (req) => {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
       JSON.stringify({ error: errorMessage }),
-      { 
+      {
         status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     );
   }
