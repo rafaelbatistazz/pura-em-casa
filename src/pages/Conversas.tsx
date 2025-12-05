@@ -786,8 +786,12 @@ export default function Conversas() {
   };
 
   // Gera timestamp ISO padrão (o banco converte para UTC e o front converte para SP na exibição)
+  // Gera timestamp ISO com offset explícito de São Paulo (UTC-3)
+  // Independente do fuso horário da máquina do usuário
   const getSaoPauloTimestamp = (): string => {
-    return new Date().toISOString();
+    const now = new Date();
+    const spString = now.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).replace(' ', 'T');
+    return `${spString}-03:00`;
   };
 
   const formatRelativeTime = (timestamp: string) => {
