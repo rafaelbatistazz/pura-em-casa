@@ -779,16 +779,14 @@ export default function Conversas() {
   };
 
   const formatRelativeTime = (timestamp: string) => {
+    if (!timestamp) return 'agora';
+
     const normalized = normalizeTimestamp(timestamp);
     const date = new Date(normalized);
     const now = new Date();
 
-    // Adjust 'now' to match the shifted time (since DB is -3h)
-    // We need to compare "DB Time" (Fake UTC) with "Now UTC - 3h"
-    const nowShifted = new Date(now);
-    nowShifted.setHours(nowShifted.getHours() - 3);
-
-    const diff = nowShifted.getTime() - date.getTime();
+    // Direct time difference (no timezone shift needed)
+    const diff = now.getTime() - date.getTime();
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
@@ -798,8 +796,7 @@ export default function Conversas() {
     if (hours < 24) return `${hours}h`;
     if (days === 1) return 'ontem';
 
-    // Use 'UTC' timezone to display the stored time as is
-    return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+    return date.toLocaleDateString('pt-BR');
   };
 
   const formatTime = (timestamp: string) => {
