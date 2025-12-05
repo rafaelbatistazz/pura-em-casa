@@ -1,0 +1,10 @@
+project_id = "aczeggpaeiqpexxacqkr"
+
+[functions.create-user]
+verify_jwt = false
+
+[functions.delete-user]
+verify_jwt = false
+
+[functions.evolution-webhook]
+verify_jwt = false
