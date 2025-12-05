@@ -689,6 +689,8 @@ export default function Conversas() {
             name: newName || phone,
             status: 'novo',
             assigned_to: role === 'admin' ? null : user?.id,
+            updated_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
           }] as never)
           .select()
           .single();
@@ -785,6 +787,11 @@ export default function Conversas() {
     return `${timestamp}Z`;
   };
 
+  // Gera timestamp ISO padrão (o banco converte para UTC e o front converte para SP na exibição)
+  const getSaoPauloTimestamp = (): string => {
+    return new Date().toISOString();
+  };
+
   const formatRelativeTime = (timestamp: string) => {
     if (!timestamp) return '';
 
@@ -792,14 +799,18 @@ export default function Conversas() {
     const date = new Date(normalized);
     const now = new Date();
 
-    // Calculate days difference
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfMessageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    // Calculate days difference based on Sao Paulo dates
+    const spDate = new Date(date.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+    const spNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+
+    const startOfToday = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate());
+    const startOfMessageDay = new Date(spDate.getFullYear(), spDate.getMonth(), spDate.getDate());
     const daysDiff = Math.floor((startOfToday.getTime() - startOfMessageDay.getTime()) / 86400000);
 
     // Today: show HH:MM
     if (daysDiff === 0) {
       return date.toLocaleTimeString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
         hour: '2-digit',
         minute: '2-digit',
         hour12: false
@@ -810,18 +821,14 @@ export default function Conversas() {
     if (daysDiff === 1) return 'Ontem';
 
     // Older: show dd/MM/yyyy
-    return date.toLocaleDateString('pt-BR');
+    return date.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   };
 
   const formatTime = (timestamp: string) => {
     const normalized = normalizeTimestamp(timestamp);
     const date = new Date(normalized);
-
-    // Debug log to verify timezone handling
-    console.log(`[TimeDebug] Raw: ${timestamp} | Normalized: ${normalized} | Date: ${date.toISOString()}`);
-
-    // Use 'UTC' timezone to display the stored time as is
     return date.toLocaleTimeString('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
       hour: '2-digit',
       minute: '2-digit',
       timeZone: 'UTC',
@@ -956,6 +963,9 @@ export default function Conversas() {
             className="w-full h-auto max-h-[300px] object-contain"
             loading="lazy"
             crossOrigin="anonymous"
+            onLoad={() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            }}
             onError={(e) => {
               console.error('Erro ao carregar imagem:', message.media_url);
               e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23ddd" width="200" height="200"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23999"%3EImagem indisponível%3C/text%3E%3C/svg%3E';
