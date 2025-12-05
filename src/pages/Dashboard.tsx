@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Users, UserPlus, TrendingUp, MessageSquare, CalendarIcon, ChevronDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+
 import { cn, getSaoPauloTimestamp, formatDisplayTime } from '@/lib/utils';
 import { startOfDay, endOfDay, subDays, startOfMonth, endOfMonth, subMonths, startOfYear, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
