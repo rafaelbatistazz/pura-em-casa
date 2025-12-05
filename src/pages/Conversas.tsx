@@ -212,9 +212,9 @@ export default function Conversas() {
       fetchUsers();
     }
 
-    // Setup realtime subscription for leads
-    const leadsChannel = supabase
-      .channel('leads-changes')
+    // Consolidated global channel for both leads and messages
+    const globalChannel = supabase
+      .channel('global-changes')
       .on(
         'postgres_changes',
         {
@@ -223,11 +223,10 @@ export default function Conversas() {
           table: 'leads',
         },
         async (payload) => {
+          console.log('Lead change received:', payload); // Debug log
           if (payload.eventType === 'INSERT') {
             const newLead = payload.new as Lead;
-            // Only add if user should see it (admin sees all, user sees assigned)
             if (role === 'admin' || newLead.assigned_to === user?.id) {
-              // Fetch last message and unread count for new lead
               const { data: lastMsgData } = await supabase
                 .from('messages')
                 .select('message_text, media_type, timestamp')
@@ -260,7 +259,6 @@ export default function Conversas() {
             }
           } else if (payload.eventType === 'UPDATE') {
             const updatedLead = payload.new as Lead;
-            // Update lead in list
             setLeads((prev) =>
               prev.map((lead) =>
                 lead.id === updatedLead.id ? { ...lead, ...updatedLead } : lead
@@ -271,11 +269,6 @@ export default function Conversas() {
           }
         }
       )
-      .subscribe();
-
-    // Global messages listener for updating lead list
-    const messagesChannel = supabase
-      .channel('all-messages')
       .on(
         'postgres_changes',
         {
@@ -284,9 +277,9 @@ export default function Conversas() {
           table: 'messages',
         },
         (payload) => {
+          console.log('Global message received:', payload); // Debug log
           const newMessage = payload.new as Message;
 
-          // Update lead in list when ANY message arrives
           setLeads((prev) => prev.map(lead => {
             if (lead.id === newMessage.lead_id) {
               let lastMessage = newMessage.message_text;
@@ -299,6 +292,9 @@ export default function Conversas() {
                 ...lead,
                 last_message: lastMessage,
                 last_message_time: newMessage.timestamp,
+                unread_count: newMessage.direction === 'inbound' && !newMessage.read
+                  ? (lead.unread_count || 0) + 1
+                  : lead.unread_count,
                 updated_at: newMessage.timestamp
               };
             }
@@ -306,11 +302,13 @@ export default function Conversas() {
           }));
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Global subscription status:', status); // Connection status log
+      });
 
     return () => {
-      supabase.removeChannel(leadsChannel);
-      supabase.removeChannel(messagesChannel);
+      console.log('Cleaning up global subscription');
+      supabase.removeChannel(globalChannel);
     };
   }, [role, user?.id]);
 
@@ -343,31 +341,11 @@ export default function Conversas() {
               }
               return [...prev, newMessage];
             });
-
-            // Update leads list with new message info
-            setLeads((prev) => prev.map(lead => {
-              if (lead.id === selectedLead.id) {
-                let lastMessage = newMessage.message_text;
-                if (newMessage.media_type === 'audio') lastMessage = '🎤 Áudio';
-                else if (newMessage.media_type === 'image') lastMessage = '📷 Imagem';
-                else if (newMessage.media_type === 'video') lastMessage = '🎬 Vídeo';
-                else if (newMessage.media_type === 'document') lastMessage = '📄 Documento';
-
-                return {
-                  ...lead,
-                  last_message: lastMessage,
-                  last_message_time: newMessage.timestamp,
-                  unread_count: newMessage.direction === 'inbound' && !newMessage.read
-                    ? (lead.unread_count || 0) + 1
-                    : lead.unread_count,
-                  updated_at: newMessage.timestamp
-                };
-              }
-              return lead;
-            }));
           }
         )
-        .subscribe();
+        .subscribe((status) => {
+          console.log(`Messages channel ${selectedLead.id} status:`, status);
+        });
 
       return () => {
         supabase.removeChannel(channel);

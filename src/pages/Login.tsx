@@ -44,7 +44,7 @@ export default function Login() {
     }
 
     toast.success('Login realizado com sucesso!');
-    
+
     // Small delay to let auth state update, then redirect based on role
     setTimeout(async () => {
       // Fetch user role to determine redirect
@@ -55,7 +55,7 @@ export default function Login() {
           .select('role')
           .eq('user_id', authUser.id)
           .single();
-        
+
         if (roleData?.role === 'admin') {
           navigate('/dashboard');
         } else {
@@ -72,8 +72,12 @@ export default function Login() {
       <div className="w-full max-w-md animate-fade-in">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="h-16 w-16 rounded-2xl bg-primary flex items-center justify-center mb-4 shadow-lg shadow-primary/25">
-            <MessageCircle className="h-8 w-8 text-primary-foreground" />
+          <div className="h-20 w-20 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 shadow-lg shadow-primary/5">
+            <img
+              src="https://lhbwfbquxkutcyqazpnw.supabase.co/storage/v1/object/public/images/logo/cr logo png.webp"
+              alt="CR Logo"
+              className="h-14 w-14 object-contain"
+            />
           </div>
           <h1 className="text-2xl font-bold text-foreground">Carlos Rodeiro CRM</h1>
           <p className="text-muted-foreground">Gestão de Atendimentos</p>
