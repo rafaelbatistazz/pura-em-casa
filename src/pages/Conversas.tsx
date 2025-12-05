@@ -923,16 +923,26 @@ export default function Conversas() {
     }
 
     if (message.media_type === 'image') {
+      // Proxy WhatsApp URLs to avoid CORS issues
+      const imageUrl = message.media_url?.includes('whatsapp.net')
+        ? `https://images.weserv.nl/?url=${encodeURIComponent(message.media_url)}`
+        : message.media_url;
+
       return (
         <div
           className="rounded-lg overflow-hidden cursor-pointer max-w-[280px]"
           onClick={() => window.open(message.media_url!, '_blank')}
         >
           <img
-            src={message.media_url}
+            src={imageUrl}
             alt="Imagem"
             className="w-full h-auto max-h-[300px] object-contain"
             loading="lazy"
+            crossOrigin="anonymous"
+            onError={(e) => {
+              console.error('Erro ao carregar imagem:', message.media_url);
+              e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23ddd" width="200" height="200"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23999"%3EImagem indisponível%3C/text%3E%3C/svg%3E';
+            }}
           />
         </div>
       );
