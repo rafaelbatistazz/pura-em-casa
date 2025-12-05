@@ -164,7 +164,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="p-4 lg:p-8 space-y-6">
+    <div className="h-full overflow-y-auto p-4 lg:p-8 space-y-6 pb-24 lg:pb-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold text-foreground">Dashboard</h1>

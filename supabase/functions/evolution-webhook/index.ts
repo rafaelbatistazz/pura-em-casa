@@ -107,10 +107,9 @@ serve(async (req) => {
       const finalMediaType = mediaTypeFromN8n || mediaType;
 
       // Get message timestamp (Evolution sends in seconds)
-      // FORCE SUBTRACT 3 HOURS to match Brazil time in DB
-      const timestampMs = data.messageTimestamp ? data.messageTimestamp * 1000 : Date.now();
-      const brazilOffset = 3 * 60 * 60 * 1000;
-      const messageTimestamp = new Date(timestampMs - brazilOffset).toISOString();
+      const messageTimestamp = data.messageTimestamp
+        ? new Date(data.messageTimestamp * 1000).toISOString()
+        : new Date().toISOString();
 
       // Get message ID
       const messageId = data.key.id || `msg-${Date.now()}`;

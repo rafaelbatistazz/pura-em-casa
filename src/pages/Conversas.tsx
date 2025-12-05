@@ -123,7 +123,8 @@ export default function Conversas() {
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
 
-  const fetchLeads = useCallback(async () => {
+  // Fetch leads with last message and unread count
+  const fetchLeads = async () => {
     let query = supabase
       .from('leads')
       .select('*')
@@ -171,7 +172,7 @@ export default function Conversas() {
       setLeads(leadsWithMessages);
     }
     setLoadingLeads(false);
-  }, [role, user]);
+  };
 
   const fetchUsers = async () => {
     const { data } = await supabase.from('users').select('*');
@@ -204,12 +205,114 @@ export default function Conversas() {
     setLoadingMessages(false);
   };
 
+  // Initial fetch and realtime subscription
   useEffect(() => {
     fetchLeads();
     if (role === 'admin') {
       fetchUsers();
     }
-  }, [fetchLeads, role]);
+
+    // Setup realtime subscription for leads
+    const leadsChannel = supabase
+      .channel('leads-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'leads',
+        },
+        async (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newLead = payload.new as Lead;
+            // Only add if user should see it (admin sees all, user sees assigned)
+            if (role === 'admin' || newLead.assigned_to === user?.id) {
+              // Fetch last message and unread count for new lead
+              const { data: lastMsgData } = await supabase
+                .from('messages')
+                .select('message_text, media_type, timestamp')
+                .eq('lead_id', newLead.id)
+                .order('timestamp', { ascending: false })
+                .limit(1)
+                .single();
+
+              const { count } = await supabase
+                .from('messages')
+                .select('*', { count: 'exact', head: true })
+                .eq('lead_id', newLead.id)
+                .eq('direction', 'inbound')
+                .eq('read', false);
+
+              let lastMessage = lastMsgData?.message_text || '';
+              if (lastMsgData?.media_type === 'audio') lastMessage = '🎤 Áudio';
+              else if (lastMsgData?.media_type === 'image') lastMessage = '📷 Imagem';
+              else if (lastMsgData?.media_type === 'video') lastMessage = '🎬 Vídeo';
+              else if (lastMsgData?.media_type === 'document') lastMessage = '📄 Documento';
+
+              const leadWithMessages = {
+                ...newLead,
+                last_message: lastMessage,
+                last_message_time: lastMsgData?.timestamp || newLead.updated_at,
+                unread_count: count || 0,
+              };
+
+              setLeads((prev) => [leadWithMessages, ...prev]);
+            }
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedLead = payload.new as Lead;
+            // Update lead in list
+            setLeads((prev) =>
+              prev.map((lead) =>
+                lead.id === updatedLead.id ? { ...lead, ...updatedLead } : lead
+              )
+            );
+          } else if (payload.eventType === 'DELETE') {
+            setLeads((prev) => prev.filter((lead) => lead.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    // Global messages listener for updating lead list
+    const messagesChannel = supabase
+      .channel('all-messages')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+        },
+        (payload) => {
+          const newMessage = payload.new as Message;
+
+          // Update lead in list when ANY message arrives
+          setLeads((prev) => prev.map(lead => {
+            if (lead.id === newMessage.lead_id) {
+              let lastMessage = newMessage.message_text;
+              if (newMessage.media_type === 'audio') lastMessage = '🎤 Áudio';
+              else if (newMessage.media_type === 'image') lastMessage = '📷 Imagem';
+              else if (newMessage.media_type === 'video') lastMessage = '🎬 Vídeo';
+              else if (newMessage.media_type === 'document') lastMessage = '📄 Documento';
+
+              return {
+                ...lead,
+                last_message: lastMessage,
+                last_message_time: newMessage.timestamp,
+                updated_at: newMessage.timestamp
+              };
+            }
+            return lead;
+          }));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(leadsChannel);
+      supabase.removeChannel(messagesChannel);
+    };
+  }, [role, user?.id]);
 
   useEffect(() => {
     if (selectedLead) {
@@ -227,6 +330,8 @@ export default function Conversas() {
           },
           (payload) => {
             const newMessage = payload.new as Message;
+
+            // Update messages list
             setMessages((prev) => {
               const exists = prev.some(m => m.id === newMessage.id || (m.id.startsWith('temp-') && m.message_text === newMessage.message_text));
               if (exists) {
@@ -238,6 +343,28 @@ export default function Conversas() {
               }
               return [...prev, newMessage];
             });
+
+            // Update leads list with new message info
+            setLeads((prev) => prev.map(lead => {
+              if (lead.id === selectedLead.id) {
+                let lastMessage = newMessage.message_text;
+                if (newMessage.media_type === 'audio') lastMessage = '🎤 Áudio';
+                else if (newMessage.media_type === 'image') lastMessage = '📷 Imagem';
+                else if (newMessage.media_type === 'video') lastMessage = '🎬 Vídeo';
+                else if (newMessage.media_type === 'document') lastMessage = '📄 Documento';
+
+                return {
+                  ...lead,
+                  last_message: lastMessage,
+                  last_message_time: newMessage.timestamp,
+                  unread_count: newMessage.direction === 'inbound' && !newMessage.read
+                    ? (lead.unread_count || 0) + 1
+                    : lead.unread_count,
+                  updated_at: newMessage.timestamp
+                };
+              }
+              return lead;
+            }));
           }
         )
         .subscribe();
@@ -857,17 +984,17 @@ export default function Conversas() {
         </a>
       );
     }
-
     return null;
   };
 
   return (
-    <div className="h-full flex overflow-hidden bg-background">
-      {/* Leads List */}
+    <div className="h-full flex bg-background">
+      {/* Conversations Sidebar - Always visible on desktop (md+), hidden on mobile when chat is open */}
       <div
         className={cn(
-          'w-full md:w-[320px] lg:w-[360px] border-r border-border flex flex-col h-full bg-card',
-          showMobileChat && 'hidden md:flex'
+          'w-full md:w-[340px] lg:w-[380px] h-full border-r border-border flex flex-col bg-card',
+          'md:flex', // Always show on desktop
+          showMobileChat && 'hidden md:flex' // Hide on mobile when chat open, but keep on desktop
         )}
       >
         {/* Header - Fixed */}
@@ -1039,18 +1166,19 @@ export default function Conversas() {
         </div>
       </div>
 
-      {/* Chat Area */}
+      {/* Chat Area - Side by side on desktop, fullscreen on mobile */}
       <div
         className={cn(
           'flex-1 min-w-0 h-full grid grid-rows-[auto_1fr_auto]',
-          !showMobileChat && 'hidden md:grid',
-          showMobileChat && 'fixed inset-0 z-[60] bg-background'
+          'hidden', // Hidden by default
+          'md:grid', // Always shown on desktop (side by side with list)
+          showMobileChat && 'grid fixed inset-0 z-[60] bg-background md:relative md:z-auto' // Fullscreen on mobile, normal on desktop
         )}
       >
         {selectedLead ? (
           <>
             {/* Chat Header - Fixed */}
-            <div className="px-2 py-2 md:px-4 md:py-2.5 border-b border-border flex items-center gap-2 md:gap-3 bg-card safe-area-top z-10">
+            <div className="relative px-2 py-2 md:px-4 md:py-2.5 border-b border-border flex items-center gap-2 md:gap-3 bg-card safe-area-top z-[100]">
               <Button
                 variant="default"
                 size="icon"
@@ -1082,7 +1210,7 @@ export default function Conversas() {
                       <ChevronDown className="h-3 w-3" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-48 p-2 bg-popover border-border" align="end">
+                  <PopoverContent className="w-48 p-2 bg-popover border-border z-[200]" align="end">
                     <div className="space-y-1">
                       <p className="text-xs font-medium text-muted-foreground px-2 py-1">Status</p>
                       {Object.entries(statusLabels).map(([key, label]) => (
@@ -1113,7 +1241,7 @@ export default function Conversas() {
                         </span>
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-56 p-2 bg-popover border-border" align="end">
+                    <PopoverContent className="w-56 p-2 bg-popover border-border z-[200]" align="end">
                       <div className="space-y-1">
                         <p className="text-xs font-medium text-muted-foreground px-2 py-1">Responsável</p>
                         <button
@@ -1207,7 +1335,7 @@ export default function Conversas() {
               ) : (
                 groupedMessages.map((item, index) =>
                   item.type === 'separator' ? (
-                    <div key={`sep-${index}`} className="flex justify-center py-2">
+                    <div key={`sep - ${index} `} className="flex justify-center py-2">
                       <span className="text-xs text-muted-foreground bg-secondary/80 px-3 py-1 rounded-lg">
                         {item.date}
                       </span>
@@ -1327,7 +1455,7 @@ export default function Conversas() {
                       value={inputText}
                       onChange={handleTextareaChange}
                       onKeyDown={handleKeyDown}
-                      placeholder="Digite uma mensagem... (/ para atalhos)"
+                      placeholder="Digite sua mensagem..."
                       rows={1}
                       className="w-full resize-none rounded-3xl bg-secondary border-0 px-4 py-3 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[48px] max-h-[120px] overflow-y-auto leading-normal"
                       style={{ fontSize: '16px' }}

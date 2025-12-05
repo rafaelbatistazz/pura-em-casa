@@ -64,6 +64,22 @@ export interface MessageShortcut {
   created_by: string | null;
 }
 
+export interface LeadDistribution {
+  id: string;
+  user_id: string;
+  is_active: boolean;
+  position: number;
+  created_at: string;
+  users?: User;
+}
+
+export interface LeadDistributionConfig {
+  id: string;
+  enabled: boolean;
+  last_assigned_index: number;
+  updated_at: string;
+}
+
 export interface LeadWithMessages extends Lead {
   messages?: Message[];
 }
