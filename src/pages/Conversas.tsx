@@ -670,8 +670,16 @@ export default function Conversas() {
   const formatRelativeTime = (timestamp: string) => {
     const normalized = normalizeTimestamp(timestamp);
     const date = new Date(normalized);
+
+    // FORCE SUBTRACT 3 HOURS for display
+    date.setHours(date.getHours() - 3);
+
     const now = new Date();
-    const diff = now.getTime() - date.getTime();
+    // Adjust 'now' to match the shifted time for relative calc
+    const nowShifted = new Date(now);
+    nowShifted.setHours(nowShifted.getHours() - 3);
+
+    const diff = nowShifted.getTime() - date.getTime();
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
@@ -680,18 +688,26 @@ export default function Conversas() {
     if (minutes < 60) return `${minutes} min`;
     if (hours < 24) return `${hours}h`;
     if (days === 1) return 'ontem';
-    return date.toLocaleDateString('pt-BR', { timeZone: TIMEZONE });
+
+    // Use 'UTC' timezone to prevent double shift since we manually shifted
+    return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
   };
 
   const formatTime = (timestamp: string) => {
     const normalized = normalizeTimestamp(timestamp);
-    // Debug log to verify timezone handling
-    console.log(`[TimeDebug] Raw: ${timestamp} | Normalized: ${normalized}`);
+    const date = new Date(normalized);
 
-    return new Date(normalized).toLocaleTimeString('pt-BR', {
+    // FORCE SUBTRACT 3 HOURS for display
+    date.setHours(date.getHours() - 3);
+
+    // Debug log to verify timezone handling
+    console.log(`[TimeDebug] Raw: ${timestamp} | Normalized: ${normalized} | Shifted: ${date.toISOString()}`);
+
+    // Use 'UTC' timezone to prevent double shift since we manually shifted
+    return date.toLocaleTimeString('pt-BR', {
       hour: '2-digit',
       minute: '2-digit',
-      timeZone: TIMEZONE,
+      timeZone: 'UTC',
     });
   };
 
