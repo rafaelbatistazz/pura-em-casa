@@ -150,7 +150,7 @@ function LeadCard({ lead, onEdit }: { lead: LeadWithUser; onEdit: (lead: LeadWit
   };
 
   return (
-    <Card 
+    <Card
       className="mb-3 border-border/50 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
       onClick={handleClick}
     >
@@ -268,15 +268,15 @@ export default function Kanban() {
     if (!error && data) {
       const leadsData = data as Lead[];
       const userIds = [...new Set(leadsData.map(l => l.assigned_to).filter(Boolean))];
-      
+
       let usersMap: Record<string, { name: string }> = {};
-      
+
       if (userIds.length > 0) {
         const { data: usersData } = await supabase
           .from('users')
           .select('id, name')
           .in('id', userIds);
-        
+
         if (usersData) {
           usersMap = usersData.reduce((acc, u) => {
             acc[u.id] = { name: u.name };
@@ -490,7 +490,7 @@ export default function Kanban() {
   const activeLead = activeId ? leads.find((lead) => lead.id === activeId) : null;
 
   return (
-    <div className="h-screen flex flex-col p-4 lg:p-8">
+    <div className="h-full flex flex-col p-4 lg:p-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold text-foreground">Kanban</h1>
@@ -637,9 +637,9 @@ export default function Kanban() {
             </div>
           </div>
           <DialogFooter className="flex justify-between">
-            <Button 
-              variant="destructive" 
-              onClick={handleDeleteLead} 
+            <Button
+              variant="destructive"
+              onClick={handleDeleteLead}
               disabled={deletingLead}
             >
               {deletingLead ? (
@@ -721,7 +721,7 @@ export default function Kanban() {
         </div>
 
         <DragOverlay>
-          {activeLead ? <LeadCard lead={activeLead} onEdit={() => {}} /> : null}
+          {activeLead ? <LeadCard lead={activeLead} onEdit={() => { }} /> : null}
         </DragOverlay>
       </DndContext>
     </div>
