@@ -1020,7 +1020,7 @@ export default function Conversas() {
         className={cn(
           'flex-1 min-w-0 h-full grid grid-rows-[auto_1fr_auto]',
           !showMobileChat && 'hidden md:grid',
-          showMobileChat && 'fixed inset-0 z-50 bg-background'
+          showMobileChat && 'fixed inset-0 z-[60] bg-background'
         )}
       >
         {selectedLead ? (
