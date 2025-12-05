@@ -193,6 +193,10 @@ export default function Conversas() {
       .order('timestamp', { ascending: true });
 
     if (!error && data) {
+      if (data.length > 0) {
+        console.log('🐞 DEBUG - First Loaded Message Raw Timestamp:', data[0].timestamp);
+        console.log('🐞 DEBUG - First Loaded Message Formatted:', formatDisplayTime(data[0].timestamp));
+      }
       setMessages(data as Message[]);
       await supabase
         .from('messages')
@@ -423,6 +427,8 @@ export default function Conversas() {
 
     // Generate timestamp once to use for both local state and database
     const timestamp = getSaoPauloTimestamp();
+    console.log('🐞 DEBUG - Generated Timestamp:', timestamp);
+    console.log('🐞 DEBUG - Browser Local Time:', new Date().toString());
 
     const tempMessage: Message = {
       id: `temp-${Date.now()}`,

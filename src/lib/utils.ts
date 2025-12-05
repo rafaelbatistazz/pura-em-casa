@@ -26,10 +26,7 @@ export const getSaoPauloTimestamp = (): string => {
 
   // sv-SE retorna "2024-12-05 15:45:00" ou similar. 
   // O replace garante formato ISO T
-  const isoLike = spTime.replace(' ', 'T');
-
-  // Adiciona o offset de SP (-03:00)
-  return `${isoLike}-03:00`;
+  return spTime.replace(' ', 'T');
 };
 
 // Formata data para exibição no fuso de São Paulo
