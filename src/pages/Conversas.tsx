@@ -1,12 +1,4 @@
 import { useEffect, useState, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
-// ... existing imports ...
-
-// ... inside formatTime function ...
-return date.toLocaleTimeString('pt-BR', {
-  timeZone: 'America/Sao_Paulo',
-  hour: '2-digit',
-  minute: '2-digit',
-});
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -837,7 +829,6 @@ export default function Conversas() {
       timeZone: 'America/Sao_Paulo',
       hour: '2-digit',
       minute: '2-digit',
-      timeZone: 'UTC',
     });
   };
 
