@@ -106,10 +106,23 @@ serve(async (req) => {
       const finalMediaUrl = mediaUrlFromN8n;
       const finalMediaType = mediaTypeFromN8n || mediaType;
 
-      // Get message timestamp (Evolution sends in seconds)
-      const messageTimestamp = data.messageTimestamp
-        ? new Date(data.messageTimestamp * 1000).toISOString()
-        : new Date().toISOString();
+      // Formata data para timestamp com offset -03:00 (igual ao front)
+      const getSPTimestamp = (unixSeconds?: number) => {
+        const date = unixSeconds ? new Date(unixSeconds * 1000) : new Date();
+        const spTime = date.toLocaleString('sv-SE', {
+          timeZone: 'America/Sao_Paulo',
+          hour12: false,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        return spTime.replace(' ', 'T') + '-03:00';
+      };
+
+      const messageTimestamp = getSPTimestamp(data.messageTimestamp);
 
       // Get message ID
       const messageId = data.key.id || `msg-${Date.now()}`;
