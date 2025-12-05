@@ -381,24 +381,12 @@ export default function Conversas() {
         supabase.removeChannel(channel);
       };
     }
-  }, [selectedLead]); // Re-subscribe if selectedLead changes? No, better to keep it stable.
-  // Actually, 'selectedLead' in dependency array might cause reconnects. 
-  // Better to use a ref for selectedLead or just filter inside.
-  // We'll trust the simple logic for now..startsWith('temp-') && m.message_text === newMessage.message_text)
-                    ?newMessage
-  : m
-                );
-}
-return [...prev, newMessage];
-            });
-          }
-        )
-        .subscribe((status) => {
-  console.log(`Messages channel ${selectedLead.id} status:`, status);
-});
-
-return () => {
-  supabase.removeChannel(channel);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }
+  }, [selectedLead]);
+supabase.removeChannel(channel);
 };
     }
   }, [selectedLead]);
