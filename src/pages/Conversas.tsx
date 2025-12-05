@@ -654,8 +654,18 @@ export default function Conversas() {
     setSavingNotes(false);
   };
 
+  const normalizeTimestamp = (timestamp: string) => {
+    if (!timestamp) return new Date().toISOString();
+    // If it's already an ISO string with Z or offset, return as is
+    if (timestamp.endsWith('Z') || timestamp.includes('+') || (timestamp.includes('-') && timestamp.split('-').length > 3)) {
+      return timestamp;
+    }
+    // Otherwise assume it's UTC and append Z
+    return `${timestamp}Z`;
+  };
+
   const formatRelativeTime = (timestamp: string) => {
-    const date = new Date(timestamp);
+    const date = new Date(normalizeTimestamp(timestamp));
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const minutes = Math.floor(diff / 60000);
@@ -670,7 +680,7 @@ export default function Conversas() {
   };
 
   const formatTime = (timestamp: string) => {
-    return new Date(timestamp).toLocaleTimeString('pt-BR', {
+    return new Date(normalizeTimestamp(timestamp)).toLocaleTimeString('pt-BR', {
       hour: '2-digit',
       minute: '2-digit',
       timeZone: TIMEZONE,
@@ -678,7 +688,7 @@ export default function Conversas() {
   };
 
   const getDateSeparator = (timestamp: string) => {
-    const date = new Date(timestamp);
+    const date = new Date(normalizeTimestamp(timestamp));
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
@@ -742,7 +752,7 @@ export default function Conversas() {
   // Sort messages by timestamp to ensure correct interleaving
   const sortedMessages = useMemo(() => {
     return [...messages].sort((a, b) =>
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      new Date(normalizeTimestamp(a.timestamp)).getTime() - new Date(normalizeTimestamp(b.timestamp)).getTime()
     );
   }, [messages]);
 
