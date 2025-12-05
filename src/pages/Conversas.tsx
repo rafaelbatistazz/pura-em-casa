@@ -38,7 +38,11 @@ const TIMEZONE = 'America/Sao_Paulo';
 
 // Gera timestamp no fuso horário de São Paulo (UTC-3)
 const getSaoPauloTimestamp = (): string => {
-  return new Date().toISOString();
+  const now = new Date();
+  // Adjust to Sao Paulo (UTC-3)
+  const offset = -3 * 60; // -180 minutes
+  const saoPauloDate = new Date(now.getTime() + offset * 60 * 1000);
+  return saoPauloDate.toISOString().replace('Z', '-03:00');
 };
 
 const statusColors: Record<LeadStatus, string> = {
@@ -362,8 +366,11 @@ export default function Conversas() {
   }, [selectedLead]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    // Small timeout to ensure DOM is updated and images/layout are stable
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, 100);
+  }, [messages, selectedLead]); // Also scroll when changing lead
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
