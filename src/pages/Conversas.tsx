@@ -36,29 +36,34 @@ import type { Lead, Message, LeadStatus, SystemConfig, User, MediaType } from '@
 
 const TIMEZONE = 'America/Sao_Paulo';
 
-// Gera timestamp no fuso horário de São Paulo (UTC-3)
-const getSaoPauloTimestamp = (): string => {
-  const now = new Date();
-  // Adjust to Sao Paulo (UTC-3)
-  const offset = -3 * 60; // -180 minutes
-  const saoPauloDate = new Date(now.getTime() + offset * 60 * 1000);
-  return saoPauloDate.toISOString().replace('Z', '-03:00');
+// Função getSaoPauloTimestamp importada de @/lib/utils
+
+const statusColors: Record<string, string> = {
+  'Novos Leads': 'bg-slate-500/20 text-slate-400',
+  'Qualificação': 'bg-yellow-500/20 text-yellow-400',
+  'Apresentação': 'bg-blue-500/20 text-blue-400',
+  'Follow-up': 'bg-orange-500/20 text-orange-400',
+  'Negociação': 'bg-purple-500/20 text-purple-400',
+  'Aguardar Pagamento': 'bg-pink-500/20 text-pink-400',
+  'Produção': 'bg-indigo-500/20 text-indigo-400',
+  'Pronto para Entrega': 'bg-teal-500/20 text-teal-400',
+  'Vendido': 'bg-emerald-500/20 text-emerald-400',
+  'Pós-Venda': 'bg-cyan-500/20 text-cyan-400',
+  'Perdido': 'bg-red-500/20 text-red-500',
 };
 
-const statusColors: Record<LeadStatus, string> = {
-  novo: 'bg-primary/20 text-primary',
-  em_atendimento: 'bg-warning/20 text-warning',
-  aguardando: 'bg-purple-500/20 text-purple-400',
-  ganho: 'bg-success/20 text-success',
-  perdido: 'bg-destructive/20 text-destructive',
-};
-
-const statusLabels: Record<LeadStatus, string> = {
-  novo: 'Novo',
-  em_atendimento: 'Em Atendimento',
-  aguardando: 'Aguardando',
-  ganho: 'Ganho',
-  perdido: 'Perdido',
+const statusLabels: Record<string, string> = {
+  'Novos Leads': 'Novos Leads',
+  'Qualificação': 'Qualificação',
+  'Apresentação': 'Apresentação',
+  'Follow-up': 'Follow-up',
+  'Negociação': 'Negociação',
+  'Aguardar Pagamento': 'Aguardar Pagamento',
+  'Produção': 'Produção',
+  'Pronto para Entrega': 'Pronto',
+  'Vendido': 'Vendido',
+  'Pós-Venda': 'Pós-Venda',
+  'Perdido': 'Perdido',
 };
 
 const avatarColors = [
@@ -135,9 +140,11 @@ export default function Conversas() {
       .select('*')
       .order('updated_at', { ascending: false });
 
-    if (role !== 'admin' && user) {
-      query = query.eq('assigned_to', user.id);
-    }
+    // FILTRO REMOVIDO: Deixar o RLS do banco decidir quem vê o que.
+    // Isso evita que leads "sumam" se o frontend achar que o usuário não é admin.
+    // if (role !== 'admin' && user) {
+    //   query = query.eq('assigned_to', user.id);
+    // }
 
     const { data, error } = await query;
 
@@ -180,7 +187,7 @@ export default function Conversas() {
   };
 
   const fetchUsers = async () => {
-    const { data } = await supabase.from('users').select('*');
+    const { data } = await supabase.from('app_profiles').select('*');
     if (data) setAllUsers(data as User[]);
   };
 
@@ -231,36 +238,55 @@ export default function Conversas() {
           console.log('Lead change received:', payload); // Debug log
           if (payload.eventType === 'INSERT') {
             const newLead = payload.new as Lead;
+
+            // DEDUPLICAÇÃO DE SEGURANÇA:
+            // Precisamos checar o estado atual antes de prosseguir com chamadas de API desnecessárias.
+            // Para isso, usamos setLeads com callback para verificar a existência.
+
+            setLeads(prev => {
+              if (prev.some(l => l.id === newLead.id)) {
+                console.log('Lead duplicated ignored:', newLead.id);
+                return prev;
+              }
+
+              // Se não existe, precisamos buscar a última mensagem e adicionar.
+              // Como não podemos fazer async dentro do setState, fazemos a busca fora
+              // MAS, para evitar conflito visual imediato, já adicionamos o lead cru
+              // e atualizamos ele depois.
+
+              // TODO: Idealmente refatorar para buscar dados antes, mas isso exige state management mais complexo.
+              // Por hora, vamos confiar que se o REST já trouxe, o 'if' acima barrou.
+              // Se for REALMENTE novo (criado agora), ele passa.
+
+              // Nota: A lógica original tentava buscar mensagens. Isso é arriscado no Realtime.
+              // Vamos adicionar o lead simples primeiro.
+              return [newLead as LeadWithMessages, ...prev];
+            });
+
+            // Busca dados complementares em segundo plano e atualiza se necessário
             if (role === 'admin' || newLead.assigned_to === user?.id) {
-              const { data: lastMsgData } = await supabase
+              supabase
                 .from('messages')
                 .select('message_text, media_type, timestamp')
                 .eq('lead_id', newLead.id)
                 .order('timestamp', { ascending: false })
                 .limit(1)
-                .single();
-
-              const { count } = await supabase
-                .from('messages')
-                .select('*', { count: 'exact', head: true })
-                .eq('lead_id', newLead.id)
-                .eq('direction', 'inbound')
-                .eq('read', false);
-
-              let lastMessage = lastMsgData?.message_text || '';
-              if (lastMsgData?.media_type === 'audio') lastMessage = '🎤 Áudio';
-              else if (lastMsgData?.media_type === 'image') lastMessage = '📷 Imagem';
-              else if (lastMsgData?.media_type === 'video') lastMessage = '🎬 Vídeo';
-              else if (lastMsgData?.media_type === 'document') lastMessage = '📄 Documento';
-
-              const leadWithMessages = {
-                ...newLead,
-                last_message: lastMessage,
-                last_message_time: lastMsgData?.timestamp || newLead.updated_at,
-                unread_count: count || 0,
-              };
-
-              setLeads((prev) => [leadWithMessages, ...prev]);
+                .single()
+                .then(({ data: lastMsgData }) => {
+                  // Atualiza o lead na lista com a mensagem, SE ele ainda estiver lá
+                  if (lastMsgData) {
+                    setLeads(current => current.map(l => {
+                      if (l.id === newLead.id) {
+                        return {
+                          ...l,
+                          last_message: lastMsgData.message_text || (lastMsgData.media_type ? 'Mídia' : ''),
+                          last_message_time: lastMsgData.timestamp
+                        };
+                      }
+                      return l;
+                    }));
+                  }
+                });
             }
           } else if (payload.eventType === 'UPDATE') {
             const updatedLead = payload.new as Lead;
@@ -347,15 +373,33 @@ export default function Conversas() {
             // Update messages list if it belongs to current conversation
             if (selectedLead && newMessage.lead_id === selectedLead.id) {
               setMessages((prev) => {
-                // Avoid duplicates and handle temp messages
-                const exists = prev.some(m => m.id === newMessage.id || (m.id.startsWith('temp-') && m.message_text === newMessage.message_text));
-                if (exists) {
+                // Deduplicação Inteligente:
+                // Ignora se o ID já existe
+                const idExists = prev.some(m => m.id === newMessage.id);
+                if (idExists) return prev;
+
+                // Ignora se for duplicata de envio (Outbound + Mesmo Texto + Recente)
+                // Isso resolve o problema de ter inserção Local + Inserção Webhook
+                if (newMessage.direction === 'outbound') {
+                  const contentDuplicate = prev.some(m =>
+                    m.direction === 'outbound' &&
+                    m.message_text === newMessage.message_text &&
+                    // Verifica se foi nos últimos 60 segundos (margem segura)
+                    Math.abs(new Date(m.timestamp).getTime() - new Date(newMessage.timestamp).getTime()) < 60000
+                  );
+                  if (contentDuplicate) return prev;
+                }
+
+                // Substitui mensagem temporária pela real se encontrar match (fallback)
+                const isTempReplace = prev.some(m => m.id.startsWith('temp-') && m.message_text === newMessage.message_text);
+                if (isTempReplace) {
                   return prev.map(m =>
                     (m.id.startsWith('temp-') && m.message_text === newMessage.message_text)
                       ? newMessage
                       : m
                   );
                 }
+
                 return [...prev, newMessage];
               });
             }
@@ -476,53 +520,41 @@ export default function Conversas() {
       const apiKey = configArray?.find((c) => c.key === 'evolution_api_key')?.value;
       const instance = configArray?.find((c) => c.key === 'evolution_instance_name')?.value;
 
+      // 1. Sempre tenta enviar via API se configurado
       if (apiUrl && apiKey && instance) {
-        if (mediaUrl && mediaType) {
-          if (mediaType === 'audio') {
-            // Audio endpoint requires 'audio' field
-            await fetch(`${apiUrl}/message/sendWhatsAppAudio/${instance}`, {
-              method: 'POST',
-              headers: {
-                apikey: apiKey,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                number: selectedLead.phone,
-                audio: mediaUrl,
-              }),
-            });
+        try {
+          if (mediaUrl && mediaType) {
+            if (mediaType === 'audio') {
+              await fetch(`${apiUrl}/message/sendWhatsAppAudio/${instance}`, {
+                method: 'POST',
+                headers: { apikey: apiKey, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ number: selectedLead.phone, audio: mediaUrl }),
+              });
+            } else {
+              await fetch(`${apiUrl}/message/sendMedia/${instance}`, {
+                method: 'POST',
+                headers: { apikey: apiKey, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  number: selectedLead.phone,
+                  mediatype: mediaType,
+                  media: mediaUrl,
+                  caption: messageText || undefined,
+                }),
+              });
+            }
           } else {
-            // For images, videos, documents - use sendMedia
-            await fetch(`${apiUrl}/message/sendMedia/${instance}`, {
+            await fetch(`${apiUrl}/message/sendText/${instance}`, {
               method: 'POST',
-              headers: {
-                apikey: apiKey,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                number: selectedLead.phone,
-                mediatype: mediaType,
-                media: mediaUrl,
-                caption: messageText || undefined,
-              }),
+              headers: { apikey: apiKey, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ number: selectedLead.phone, text: messageText }),
             });
           }
-        } else {
-          // Send text message
-          await fetch(`${apiUrl}/message/sendText/${instance}`, {
-            method: 'POST',
-            headers: {
-              apikey: apiKey,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              number: selectedLead.phone,
-              text: messageText,
-            }),
-          });
+        } catch (apiError) {
+          console.error('Erro ao enviar via API:', apiError);
         }
       }
 
+      // 2. SEMPRE insere no banco para garantir histórico (Confiabilidade > Duplicidade temporária)
       await supabase.from('messages').insert([{
         lead_id: selectedLead.id,
         phone: selectedLead.phone,
@@ -535,6 +567,8 @@ export default function Conversas() {
         read: true,
       }] as never);
 
+
+      // Atualiza o lead de qualquer forma para o update_at subir
       await supabase
         .from('leads')
         .update({ updated_at: timestamp } as never)
@@ -686,6 +720,11 @@ export default function Conversas() {
     // Normalize phone number to prevent duplicates
     const phone = normalizePhone(newPhone);
 
+    if (!phone) {
+      toast.error('Telefone inválido');
+      return;
+    }
+
     setCreatingConversation(true);
     try {
       const { data: existingLead } = await supabase
@@ -695,39 +734,60 @@ export default function Conversas() {
         .single();
 
       if (existingLead) {
-        setSelectedLead(existingLead as LeadWithMessages);
-        setShowMobileChat(true);
-        toast.info('Conversa existente selecionada');
-      } else {
-        const { data: newLead, error } = await supabase
-          .from('leads')
-          .insert([{
-            phone,
-            name: newName || phone,
-            status: 'novo',
-            assigned_to: role === 'admin' ? null : user?.id,
-            updated_at: getSaoPauloTimestamp(),
-            created_at: getSaoPauloTimestamp(),
-          }] as never)
-          .select()
-          .single();
+        // Se já existe, só abre o lead existente (com aviso)
+        toast.info(`Telefone já cadastrado! Abrindo: ${existingLead.name}`);
+        setNewConversationOpen(false);
+        setNewPhone('');
+        setNewName('');
 
-        if (error) throw error;
+        // Seleciona o lead existente
+        // Precisamos garantir que ele está na lista visual
+        const leadWithDetails = {
+          ...existingLead,
+          last_message: '',
+          unread_count: 0
+        };
 
-        setSelectedLead(newLead as LeadWithMessages);
-        setShowMobileChat(true);
-        toast.success('Nova conversa criada!');
-        fetchLeads();
+        // Adiciona à lista se não estiver e seleciona
+        setLeads(prev => {
+          if (prev.some(l => l.id === existingLead.id)) return prev;
+          return [leadWithDetails as any, ...prev];
+        });
+
+        setTimeout(() => setSelectedLead(leadWithDetails as any), 100);
+        return;
       }
 
-      setNewConversationOpen(false);
-      setNewPhone('');
-      setNewName('');
+      // Create new lead if doesn't exist
+      const { data: newLead, error } = await supabase
+        .from('leads')
+        .insert([{
+          name: newName,
+          phone,
+          status: 'novo',
+          assigned_to: role === 'admin' ? null : user?.id,
+          updated_at: getSaoPauloTimestamp(),
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (newLead) {
+        const leadWithDetails = { ...newLead, last_message: '', unread_count: 0 };
+        setLeads((prev) => [leadWithDetails as any, ...prev]);
+        setSelectedLead(leadWithDetails as any);
+        setNewConversationOpen(false);
+        setNewPhone('');
+        setNewName('');
+        toast.success('Novo lead criado!');
+      }
     } catch (error) {
+      console.error('Error creating conversation:', error);
       toast.error('Erro ao criar conversa');
-      console.error(error);
+    } finally {
+      setCreatingConversation(false);
     }
-    setCreatingConversation(false);
   };
 
   const handleMobileBack = () => {
@@ -1304,42 +1364,22 @@ export default function Conversas() {
                   </Popover>
                 )}
 
-                {/* Notes */}
-                <Dialog open={notesOpen} onOpenChange={(open) => {
-                  setNotesOpen(open);
-                  if (open) setEditingNotes(selectedLead.notes || '');
-                }}>
-                  <DialogTrigger asChild>
-                    <Button variant="ghost" size="icon" className="relative h-9 w-9 touch-manipulation text-foreground hover:bg-secondary">
-                      <FileText className="h-4 w-4" />
-                      {selectedLead.notes && (
-                        <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-primary rounded-full" />
-                      )}
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="mx-4 max-w-[calc(100vw-2rem)] sm:max-w-lg bg-card border-border">
-                    <DialogHeader>
-                      <DialogTitle>Observações</DialogTitle>
-                      <DialogDescription>Adicione notas sobre este cliente</DialogDescription>
-                    </DialogHeader>
-                    <div className="py-4">
-                      <Textarea
-                        value={editingNotes}
-                        onChange={(e) => setEditingNotes(e.target.value)}
-                        placeholder="Digite observações sobre o cliente..."
-                        rows={5}
-                        className="min-h-[120px] bg-secondary border-border"
-                      />
-                    </div>
-                    <DialogFooter className="flex-col sm:flex-row gap-2">
-                      <Button variant="outline" onClick={() => setNotesOpen(false)} className="h-11 w-full sm:w-auto">Cancelar</Button>
-                      <Button onClick={handleSaveNotes} disabled={savingNotes} className="h-11 w-full sm:w-auto bg-primary hover:bg-primary/90">
-                        {savingNotes ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        Salvar
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
+                {/* Notes Button - Independent */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="relative h-9 w-9 touch-manipulation text-foreground hover:bg-secondary"
+                  onClick={() => {
+                    console.log('Force opening notes for lead:', selectedLead.id);
+                    setEditingNotes(selectedLead.notes || '');
+                    setNotesOpen(true);
+                  }}
+                >
+                  <FileText className="h-4 w-4" />
+                  {selectedLead.notes && (
+                    <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-primary rounded-full" />
+                  )}
+                </Button>
               </div>
             </div>
 
@@ -1424,7 +1464,7 @@ export default function Conversas() {
             </div>
 
             {/* Input Area - Fixed */}
-            <div className="px-2 py-2 md:px-3 md:py-2.5 border-t border-border bg-card safe-area-bottom z-10">
+            <div className="relative px-2 py-2 md:px-3 md:py-2.5 border-t border-border bg-card safe-area-bottom z-10">
               <MessageShortcuts
                 isOpen={showShortcuts}
                 searchText={shortcutSearch}
@@ -1530,6 +1570,35 @@ export default function Conversas() {
           </div>
         )}
       </div>
+      {/* Notes Dialog - Global at page level */}
+      {selectedLead && (
+        <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
+          <DialogContent className="mx-4 max-w-[calc(100vw-2rem)] sm:max-w-lg bg-card border-border">
+            <DialogHeader>
+              <DialogTitle>Observações</DialogTitle>
+              <DialogDescription>Adicione notas sobre este cliente</DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+              <Textarea
+                value={editingNotes}
+                onChange={(e) => setEditingNotes(e.target.value)}
+                placeholder="Digite observações sobre o cliente..."
+                rows={5}
+                className="min-h-[120px] bg-secondary border-border"
+              />
+            </div>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setNotesOpen(false)} className="h-11 w-full sm:w-auto">Cancelar</Button>
+              <Button onClick={handleSaveNotes} disabled={savingNotes} className="h-11 w-full sm:w-auto bg-primary hover:bg-primary/90">
+                {savingNotes ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Salvar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* New Lead/Conversation Dialogs would be here too... */}
     </div>
   );
 }

@@ -5,11 +5,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Retorna ISO string padrão (UTC).
-// Revertido para garantir estabilidade da aplicação (evitar crash no Kanban).
-// Ex: 2024-12-05T20:00:00.000Z
+// Retorna ISO string com offset de São Paulo (-03:00) explicitamente
 export const getSaoPauloTimestamp = (): string => {
-  return new Date().toISOString();
+  const now = new Date();
+  const offset = -3 * 60; // -180 minutes (UTC-3)
+  const saoPauloDate = new Date(now.getTime() + offset * 60 * 1000);
+  return saoPauloDate.toISOString().replace('Z', '-03:00');
 };
 
 // Formata data para exibição no fuso de São Paulo

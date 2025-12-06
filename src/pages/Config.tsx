@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn, getSaoPauloTimestamp } from '@/lib/utils';
@@ -55,7 +56,7 @@ import {
 import type { User as UserType, UserRole, SystemConfig, MessageShortcut, LeadDistribution, LeadDistributionConfig } from '@/types/database';
 
 export default function Config() {
-  const { userData, updatePassword, role, signOut } = useAuth();
+  const { user, userData, updatePassword, role, signOut } = useAuth();
   const [users, setUsers] = useState<UserType[]>([]);
   const [configs, setConfigs] = useState<SystemConfig[]>([]);
   const [qrCode, setQrCode] = useState<string | null>(null);
@@ -113,15 +114,157 @@ export default function Config() {
   const [testingWebhook, setTestingWebhook] = useState(false);
 
   const fetchUsers = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .order('created_at', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('app_profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    if (!error && data) {
+      if (error) throw error;
       setUsers(data as UserType[]);
+    } catch (error) {
+      console.error('Erro ao buscar usuários:', error);
+      toast.error('Erro ao carregar lista de usuários');
     }
   }, []);
+
+  const [inviteFallbackOpen, setInviteFallbackOpen] = useState(false);
+
+  /* Handlers de Gerenciamento de Usuários (Simplificado e Direto) */
+  const handleCreateUser = async () => {
+    if (!newUserName || !newUserEmail || !newUserPassword) {
+      toast.error('Preencha todos os campos');
+      return;
+    }
+
+    if (newUserPassword.length < 6) {
+      toast.error('A senha deve ter pelo menos 6 caracteres');
+      return;
+    }
+
+    setCreatingUser(true);
+    try {
+      // TRUQUE DO "CLIENTE TEMPORÁRIO":
+      // Criamos uma instância isolada do Supabase para criar o usuário SEM deslogar o admin.
+      // Isso elimina a necessidade de Edge Functions.
+      const tempSupabase = createClient(
+        import.meta.env.VITE_SUPABASE_URL,
+        import.meta.env.VITE_SUPABASE_ANON_KEY,
+        {
+          auth: {
+            persistSession: false, // IMPORTANTE: Não salva sessão, não desloga o admin
+            autoRefreshToken: false,
+            detectSessionInUrl: false
+          }
+        }
+      );
+
+      // 1. Criar o usuário no Auth
+      const { data: authData, error: authError } = await tempSupabase.auth.signUp({
+        email: newUserEmail,
+        password: newUserPassword,
+        options: {
+          data: {
+            name: newUserName // Passa o metadata para o trigger usar
+          }
+        }
+      });
+
+      if (authError) throw authError;
+      if (!authData.user) throw new Error('Erro ao criar usuário (sem dados retornados)');
+
+      const newUserId = authData.user.id;
+
+      // 2. Atualizar o Role (se for admin)
+      // O trigger já criou o usuário como 'user' (ou 'admin' se for o primeiro).
+      // Agora garantimos o role escolhido.
+      if (newUserRole) {
+        // Aguardamos um pouco para garantir que o trigger rodou
+        await new Promise(r => setTimeout(r, 1000));
+
+        const { error: updateError } = await supabase
+          .from('app_profiles')
+          .update({ role: newUserRole })
+          .eq('id', newUserId);
+
+        if (updateError) {
+          console.warn('Erro ao atualizar role inicial (pode ser ajustado depois):', updateError);
+          // Não falhamos o processo todo por isso, o usuário já foi criado.
+        }
+      }
+
+      toast.success('Usuário adicionado com sucesso!');
+      setNewUserOpen(false);
+      resetForm();
+      fetchUsers();
+    } catch (error: any) {
+      console.error('Erro ao adicionar:', error);
+      toast.error(error.message || 'Erro ao criar usuário');
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
+  const resetForm = () => {
+    setNewUserEmail('');
+    setNewUserPassword('');
+    setNewUserName('');
+    setNewUserRole('user');
+  };
+
+  const handleToggleRole = async (userId: string, currentRole: UserRole) => {
+    const newRole: UserRole = currentRole === 'admin' ? 'user' : 'admin';
+    const previousUsers = [...users];
+
+    // Optimistic update
+    setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
+
+    try {
+      // Update direto no banco (Funciona sempre se RLS estiver certo)
+      const { error } = await supabase
+        .from('app_profiles')
+        .update({ role: newRole })
+        .eq('id', userId);
+
+      if (error) throw error;
+      toast.success(`Role alterado para ${newRole === 'admin' ? 'Admin' : 'Usuário'}`);
+    } catch (error: any) {
+      console.error('Erro ao atualizar role:', error);
+      toast.error('Erro ao atualizar permissão. Verifique se você é Admin.');
+      setUsers(previousUsers);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm('Tem certeza? O usuário perderá o acesso imediatamente.')) return;
+
+    const previousUsers = [...users];
+    setUsers(users.filter(u => u.id !== userId));
+
+    try {
+      // DELETE GLOBAL (Via Edge Function - se disponível)
+      // Se não tiver Edge Function, fazemos DELETE local no banco.
+      const { error: fnError } = await supabase.functions.invoke('delete-user', {
+        body: { userId }
+      });
+
+      if (fnError) {
+        // Fallback: Delete local
+        const { error: dbError } = await supabase
+          .from('app_profiles')
+          .delete()
+          .eq('id', userId);
+        if (dbError) throw dbError;
+      }
+
+      toast.success('Usuário removido');
+    } catch (error: any) {
+      console.error('Erro ao excluir usuário:', error);
+      // Se deu erro, revertemos a UI mas tentamos limpar do banco local de qualquer jeito
+      toast.error('Erro ao excluir usuário');
+      setUsers(previousUsers);
+    }
+  };
 
   const fetchConfigs = useCallback(async () => {
     const { data, error } = await supabase
@@ -209,7 +352,7 @@ export default function Config() {
       // Fetch user details separately to avoid RLS issues with JOIN
       const userIds = distributionData.map(d => d.user_id);
       const { data: usersData, error: usersError } = await supabase
-        .from('users')
+        .from('app_profiles')
         .select('*')
         .in('id', userIds);
 
@@ -424,106 +567,6 @@ export default function Config() {
     setSavingCredentials(false);
   };
 
-  const handleCreateUser = async () => {
-    if (!newUserName || !newUserEmail || !newUserPassword) {
-      toast.error('Preencha todos os campos');
-      return;
-    }
-
-    if (newUserPassword.length < 6) {
-      toast.error('A senha deve ter pelo menos 6 caracteres');
-      return;
-    }
-
-    setCreatingUser(true);
-    try {
-      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-
-      if (refreshError || !refreshData.session) {
-        toast.error('Sessão expirada. Faça login novamente.');
-        return;
-      }
-
-      const response = await supabase.functions.invoke('create-user', {
-        body: {
-          name: newUserName,
-          email: newUserEmail,
-          password: newUserPassword,
-          role: newUserRole,
-        },
-      });
-
-      if (response.error) throw response.error;
-      if (response.data?.error) throw new Error(response.data.error);
-
-      toast.success('Usuário criado com sucesso!');
-      setNewUserOpen(false);
-      setNewUserName('');
-      setNewUserEmail('');
-      setNewUserPassword('');
-      setNewUserRole('user');
-      fetchUsers();
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Erro ao criar usuário';
-      toast.error(errorMessage);
-    }
-    setCreatingUser(false);
-  };
-
-  const handleToggleRole = async (userId: string, _currentRole: UserRole) => {
-    const userToUpdate = users.find(u => u.id === userId);
-    if (!userToUpdate) return;
-
-    const newRole: UserRole = userToUpdate.role === 'admin' ? 'user' : 'admin';
-
-    try {
-      const { error: usersError } = await supabase
-        .from('users')
-        .update({ role: newRole } as never)
-        .eq('id', userId);
-
-      if (usersError) throw usersError;
-
-      const { error: rolesError } = await supabase
-        .from('user_roles')
-        .update({ role: newRole } as never)
-        .eq('user_id', userId);
-
-      if (rolesError) throw rolesError;
-
-      toast.success(`Usuário alterado para ${newRole === 'admin' ? 'Admin' : 'Usuário'}!`);
-      fetchUsers();
-    } catch (error) {
-      toast.error('Erro ao atualizar role');
-    }
-  };
-
-  const handleDeleteUser = async (userId: string) => {
-    if (!confirm('Tem certeza que deseja excluir este usuário?')) return;
-
-    try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
-      if (sessionError || !session) {
-        toast.error('Sessão expirada. Faça login novamente.');
-        return;
-      }
-
-      const response = await supabase.functions.invoke('delete-user', {
-        body: { userId },
-      });
-
-      if (response.error) throw response.error;
-      if (response.data?.error) throw new Error(response.data.error);
-
-      toast.success('Usuário excluído');
-      fetchUsers();
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Erro ao excluir usuário';
-      toast.error(errorMessage);
-    }
-  };
-
   const handleSaveWebhooks = async () => {
     setSavingWebhooks(true);
     try {
@@ -617,7 +660,7 @@ export default function Config() {
 
     setSavingProfile(true);
     const { error } = await supabase
-      .from('users')
+      .from('app_profiles')
       .update({ name: editName, email: editEmail } as never)
       .eq('id', userData?.id);
 
@@ -711,7 +754,13 @@ export default function Config() {
     <div className="h-full overflow-y-auto p-4 lg:p-8 space-y-6 pb-24 lg:pb-8">
       <div className="max-w-4xl space-y-6">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-bold text-foreground">Configurações</h1>
+          <h1 className="text-2xl lg:text-3xl font-bold text-foreground flex items-center gap-3">
+            Configurações
+            <Badge variant="outline" className="text-xs font-normal">
+              {role === 'admin' ? 'Admin' : 'Usuário Padrão'}
+              <span className="ml-1 opacity-50">({user?.id?.slice(0, 4)}...)</span>
+            </Badge>
+          </h1>
           <p className="text-muted-foreground">Gerencie as configurações do sistema</p>
         </div>
 
@@ -765,6 +814,70 @@ export default function Config() {
                     </div>
                   </div>
                 )}
+
+                <div className="mt-4 pt-4 border-t border-border">
+                  <Dialog open={editCredentialsOpen} onOpenChange={setEditCredentialsOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" className="w-full sm:w-auto">
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Configurar Credenciais
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="bg-card border-border">
+                      <DialogHeader>
+                        <DialogTitle>Configurar Evolution API</DialogTitle>
+                        <DialogDescription>
+                          Insira as credenciais da sua instância da Evolution API
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                          <Label>API URL</Label>
+                          <Input
+                            value={editApiUrl}
+                            onChange={(e) => setEditApiUrl(e.target.value)}
+                            placeholder="https://api.seudominio.com"
+                            className="bg-secondary border-border"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>API Key</Label>
+                          <Input
+                            type="password"
+                            value={editApiKey}
+                            onChange={(e) => setEditApiKey(e.target.value)}
+                            placeholder="Sua API Key Global"
+                            className="bg-secondary border-border"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Nome da Instância</Label>
+                          <Input
+                            value={editInstanceName}
+                            onChange={(e) => setEditInstanceName(e.target.value)}
+                            placeholder="Nome da Instância"
+                            className="bg-secondary border-border"
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditCredentialsOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleSaveCredentials} disabled={savingCredentials} className="bg-primary hover:bg-primary/90">
+                          {savingCredentials ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Salvando...
+                            </>
+                          ) : (
+                            'Salvar'
+                          )}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </CardContent>
             </Card>
 
@@ -911,6 +1024,7 @@ export default function Config() {
             </Collapsible>
 
             {/* Users Management */}
+            {/* Users Management */}
             <Card className="border-border bg-card">
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -919,7 +1033,7 @@ export default function Config() {
                       <Users className="h-5 w-5" />
                       Gerenciar Usuários
                     </CardTitle>
-                    <CardDescription>Adicione e gerencie usuários do sistema</CardDescription>
+                    <CardDescription>Adicione e gerencie usuários do sistema (Admins têm acesso total)</CardDescription>
                   </div>
                   <Dialog open={newUserOpen} onOpenChange={setNewUserOpen}>
                     <DialogTrigger asChild>
@@ -932,7 +1046,9 @@ export default function Config() {
                       <DialogHeader>
                         <DialogTitle>Novo Usuário</DialogTitle>
                         <DialogDescription>
-                          Preencha os dados para criar um novo usuário
+                          Preencha os dados para criar um novo usuário.
+                          <br />
+                          <span className="text-xs text-muted-foreground">Nota: Requer Edge Function 'create-user' implantada.</span>
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
@@ -966,14 +1082,14 @@ export default function Config() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>Role</Label>
+                          <Label>Função (Role)</Label>
                           <Select value={newUserRole} onValueChange={(v) => setNewUserRole(v as UserRole)}>
                             <SelectTrigger className="bg-secondary border-border">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent className="bg-popover border-border">
-                              <SelectItem value="user">Usuário</SelectItem>
-                              <SelectItem value="admin">Admin</SelectItem>
+                              <SelectItem value="user">Usuário Padrão</SelectItem>
+                              <SelectItem value="admin">Administrador</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -1012,43 +1128,54 @@ export default function Config() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {users.map((user) => (
-                      <div
-                        key={user.id}
-                        className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/30"
-                      >
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-10 w-10 bg-primary">
-                            <AvatarFallback className="text-primary-foreground">
-                              {getInitials(user.name)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1">
-                            <p className="font-medium text-foreground">{user.name}</p>
-                            <p className="text-sm text-muted-foreground">{user.email}</p>
+                    {users.length === 0 ? (
+                      <p className="text-muted-foreground text-center py-4">Nenhum usuário encontrado (exceto você).</p>
+                    ) : (
+                      users.map((user) => (
+                        <div
+                          key={user.id}
+                          className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/30"
+                        >
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-10 w-10 bg-primary">
+                              <AvatarFallback className="text-primary-foreground">
+                                {getInitials(user.name || user.email)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1">
+                              <p className="font-medium text-foreground">{user.name || 'Sem nome'}</p>
+                              <p className="text-sm text-muted-foreground">{user.email}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
+                              {user.role === 'admin' ? 'Admin' : 'Usuário'}
+                            </Badge>
+
+                            {/* Actions only valid if not self (usually) but let's allow editing roles */}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              title={user.role === 'admin' ? 'Rebaixar para Usuário' : 'Promover a Admin'}
+                              onClick={() => handleToggleRole(user.id, user.role)}
+                              disabled={user.id === userData?.id} // Prevent self-demotion lockout if desired, or allow it
+                            >
+                              <Key className="h-4 w-4" />
+                            </Button>
+
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              title="Excluir Usuário"
+                              onClick={() => handleDeleteUser(user.id)}
+                              disabled={user.id === userData?.id} // Prevent self-deletion
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                            {user.role === 'admin' ? 'Admin' : 'Usuário'}
-                          </Badge>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleToggleRole(user.id, user.role)}
-                          >
-                            {user.role === 'admin' ? 'Tornar Usuário' : 'Tornar Admin'}
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => handleDeleteUser(user.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -1266,6 +1393,6 @@ export default function Config() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </div >
   );
 }

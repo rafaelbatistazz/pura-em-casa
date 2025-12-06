@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { normalizePhone } from '@/lib/phoneUtils';
 import { cn, getSaoPauloTimestamp, formatDisplayTime } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -50,14 +51,52 @@ import type { Lead, LeadStatus, User } from '@/types/database';
 import { Phone, Clock, Plus, Loader2, Trash2 } from 'lucide-react';
 import type { User as UserType, LeadStatus as LeadStatusType } from '@/types/database';
 
-const columns: { id: LeadStatus; title: string; color: string }[] = [
-  { id: 'novo', title: 'Novo', color: 'bg-kanban-novo border-primary/20' },
-  { id: 'em_atendimento', title: 'Em Atendimento', color: 'bg-kanban-atendimento border-warning/20' },
-  { id: 'aguardando', title: 'Aguardando', color: 'bg-kanban-aguardando border-purple-500/20' },
-  { id: 'ganho', title: 'Ganho', color: 'bg-kanban-ganho border-success/20' },
-  { id: 'perdido', title: 'Perdido', color: 'bg-kanban-perdido border-destructive/20' },
+const statusColors: Record<string, string> = {
+  'Novos Leads': 'bg-slate-500/20 text-slate-400',
+  'Qualificação': 'bg-yellow-500/20 text-yellow-400',
+  'Apresentação': 'bg-blue-500/20 text-blue-400',
+  'Follow-up': 'bg-orange-500/20 text-orange-400',
+  'Negociação': 'bg-purple-500/20 text-purple-400',
+  'Aguardar Pagamento': 'bg-pink-500/20 text-pink-400',
+  'Produção': 'bg-indigo-500/20 text-indigo-400',
+  'Pronto para Entrega': 'bg-teal-500/20 text-teal-400',
+  'Vendido': 'bg-emerald-500/20 text-emerald-400',
+  'Pós-Venda': 'bg-cyan-500/20 text-cyan-400',
+  'Perdido': 'bg-red-500/20 text-red-500',
+};
+
+const statusLabels: Record<string, string> = {
+  'Novos Leads': 'Novos Leads',
+  'Qualificação': 'Qualificação',
+  'Apresentação': 'Apresentação / Showroom',
+  'Follow-up': 'Follow-up',
+  'Negociação': 'Negociação / Orçamento',
+  'Aguardar Pagamento': 'Aguardar Pagamento',
+  'Produção': 'Produção / Ajustes',
+  'Pronto para Entrega': 'Pronto para Entrega',
+  'Vendido': 'Vendido / Entregue',
+  'Pós-Venda': 'Pós-Venda (LTV)',
+  'Perdido': 'Perdido',
+};
+
+const kanbanColumns: string[] = [
+  'Novos Leads',
+  'Qualificação',
+  'Apresentação',
+  'Follow-up',
+  'Negociação',
+  'Aguardar Pagamento',
+  'Produção',
+  'Pronto para Entrega',
+  'Vendido',
+  'Pós-Venda',
 ];
 
+const columns = kanbanColumns.map(status => ({
+  id: status,
+  title: statusLabels[status],
+  color: statusColors[status] || 'bg-gray-500/20 text-gray-400'
+}));
 const avatarColors = [
   'bg-primary',
   'bg-success',
@@ -256,9 +295,11 @@ export default function Kanban() {
       .select('*')
       .order('kanban_position', { ascending: true });
 
-    if (role !== 'admin' && user) {
-      query = query.eq('assigned_to', user.id);
-    }
+    // FILTRO REMOVIDO: Deixar o RLS do banco decidir.
+    // Isso resolve o problema de leads sumindo se o frontend falhar na checagem de role.
+    // if (role !== 'admin' && user) {
+    //   query = query.eq('assigned_to', user.id);
+    // }
 
     const { data, error } = await query;
 
@@ -270,7 +311,7 @@ export default function Kanban() {
 
       if (userIds.length > 0) {
         const { data: usersData } = await supabase
-          .from('users')
+          .from('app_profiles')
           .select('id, name')
           .in('id', userIds);
 
@@ -294,7 +335,7 @@ export default function Kanban() {
 
   const fetchUsers = useCallback(async () => {
     if (role !== 'admin') return;
-    const { data } = await supabase.from('users').select('*');
+    const { data } = await supabase.from('app_profiles').select('*');
     if (data) setUsers(data as UserType[]);
   }, [role]);
 
@@ -309,13 +350,29 @@ export default function Kanban() {
       return;
     }
 
-    let phone = newLeadPhone.replace(/\D/g, '');
-    if (!phone.startsWith('55') && phone.length <= 11) {
-      phone = '55' + phone;
+    // Use centralized normalization to enforce 9th digit and standard format
+    const phone = normalizePhone(newLeadPhone);
+
+    if (!phone) {
+      toast.error('Telefone inválido');
+      return;
     }
 
     setCreatingLead(true);
     try {
+      // PROACTIVE DUPLICATE CHECK
+      const { data: existingLead } = await supabase
+        .from('leads')
+        .select('id, name')
+        .eq('phone', phone)
+        .single();
+
+      if (existingLead) {
+        toast.error(`Telefone já cadastrado! Cliente: ${existingLead.name}`);
+        setCreatingLead(false);
+        return;
+      }
+
       const { error } = await supabase.from('leads').insert([{
         name: newLeadName,
         phone,
@@ -331,6 +388,7 @@ export default function Kanban() {
       setNewLeadPhone('');
       setNewLeadStatus('novo');
       setNewLeadAssignedTo('');
+      fetchLeads();
       fetchLeads();
     } catch (error) {
       toast.error('Erro ao criar lead');
@@ -591,6 +649,7 @@ export default function Kanban() {
                 value={editLeadPhone}
                 onChange={(e) => setEditLeadPhone(e.target.value)}
                 placeholder="(11) 99999-9999"
+                disabled={role !== 'admin'}
               />
             </div>
             <div className="space-y-2">
@@ -634,18 +693,20 @@ export default function Kanban() {
             </div>
           </div>
           <DialogFooter className="flex justify-between">
-            <Button
-              variant="destructive"
-              onClick={handleDeleteLead}
-              disabled={deletingLead}
-            >
-              {deletingLead ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Trash2 className="mr-2 h-4 w-4" />
-              )}
-              Excluir
-            </Button>
+            {role === 'admin' && (
+              <Button
+                variant="destructive"
+                onClick={handleDeleteLead}
+                disabled={deletingLead}
+              >
+                {deletingLead ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="mr-2 h-4 w-4" />
+                )}
+                Excluir
+              </Button>
+            )}
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setEditLeadOpen(false)}>Cancelar</Button>
               <Button onClick={handleSaveLead} disabled={savingLead}>

@@ -1,5 +1,5 @@
 export type UserRole = 'admin' | 'user';
-export type LeadStatus = 'novo' | 'em_atendimento' | 'aguardando' | 'ganho' | 'perdido';
+export type LeadStatus = string;
 export type MessageDirection = 'inbound' | 'outbound';
 export type InstanceStatus = 'connected' | 'disconnected' | 'connecting';
 
@@ -87,7 +87,7 @@ export interface LeadWithMessages extends Lead {
 export interface Database {
   public: {
     Tables: {
-      users: {
+      app_profiles: {
         Row: User;
         Insert: {
           id: string;

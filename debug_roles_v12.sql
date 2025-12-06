@@ -1,0 +1,2 @@
+-- CHECK USER ROLES CONTENT
+SELECT * FROM public.user_roles;

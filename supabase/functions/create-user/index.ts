@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    
+
     // Decode JWT to get user ID
     const decoded = decodeJwt(token)
     if (!decoded?.sub) {
@@ -55,23 +55,27 @@ Deno.serve(async (req) => {
     const callerId = decoded.sub
     console.log('Caller ID from JWT:', callerId, 'Email:', decoded.email)
 
-    // Verificar se quem chamou é admin usando a tabela user_roles
-    const { data: roleData, error: roleError } = await supabaseAdmin
-      .from('user_roles')
+    // Verificar se quem chamou é admin usando a tabela users
+    const { data: userData, error: userError } = await supabaseAdmin
+      .from('users')
       .select('role')
-      .eq('user_id', callerId)
+      .eq('id', callerId)
       .single()
-    
-    if (roleError) {
-      console.log('Erro ao buscar role:', roleError.message)
+
+    console.log('Role query result:', { userData, userError })
+
+    if (userError) {
+      console.log('Erro ao buscar role:', userError.message)
       return new Response(JSON.stringify({ error: 'Usuário não encontrado' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
 
-    if (roleData?.role !== 'admin') {
-      console.log('Usuário não é admin:', decoded.email)
+    console.log(`Role encontrada para ${decoded.email}: ${userData?.role}`)
+
+    if (userData?.role !== 'admin') {
+      console.log(`Usuário não é admin: ${decoded.email} (role: ${userData?.role})`)
       return new Response(JSON.stringify({ error: 'Apenas admins podem criar usuários' }), {
         status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -100,12 +104,12 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Criar no auth COM user_metadata (o trigger handle_new_user usará o name)
+    // Criar no auth COM user_metadata
     const { data: newUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
-      email_confirm: true,
-      user_metadata: { name }  // O trigger usará isso!
+      email_confirm: true, // Já cria confirmado
+      user_metadata: { name }
     })
 
     if (authError) {
@@ -121,50 +125,27 @@ Deno.serve(async (req) => {
 
     console.log(`Usuário criado no auth: ${newUser.user.id}`)
 
-    // O trigger on_auth_user_created já inseriu em users e user_roles com role='user'
-    // Agora apenas atualizamos o name e role se necessário
-    
-    // Aguardar um momento para o trigger executar
-    await new Promise(resolve => setTimeout(resolve, 100))
+    // Aguardar trigger executar (insere na users)
+    await new Promise(resolve => setTimeout(resolve, 300))
 
-    // Atualizar o name na tabela users (caso o trigger não tenha pego corretamente)
-    const { error: updateNameError } = await supabaseAdmin
+    // Atualizar dados na tabela users (para garantir role e name corretos)
+    const { error: updateError } = await supabaseAdmin
       .from('users')
-      .update({ name })
+      .update({ name, role })
       .eq('id', newUser.user.id)
 
-    if (updateNameError) {
-      console.log('Erro ao atualizar name:', updateNameError.message)
+    if (updateError) {
+      console.log('Erro ao atualizar usuario na tabela:', updateError.message)
+      // Não falhar completamente, pois o usuário foi criado
     }
 
-    // Se o role for diferente de 'user', atualizar nas duas tabelas
-    if (role !== 'user') {
-      console.log(`Atualizando role para: ${role}`)
-      
-      const { error: updateUsersRoleError } = await supabaseAdmin
-        .from('users')
-        .update({ role })
-        .eq('id', newUser.user.id)
-
-      if (updateUsersRoleError) {
-        console.log('Erro ao atualizar role em users:', updateUsersRoleError.message)
-      }
-
-      const { error: updateUserRolesError } = await supabaseAdmin
-        .from('user_roles')
-        .update({ role })
-        .eq('user_id', newUser.user.id)
-
-      if (updateUserRolesError) {
-        console.log('Erro ao atualizar role em user_roles:', updateUserRolesError.message)
-      }
-    }
+    console.log(`Usuário criado e atualizado com sucesso: ${email}`)
 
     console.log(`Usuário criado com sucesso: ${email} (${newUser.user.id})`)
 
-    return new Response(JSON.stringify({ 
-      success: true, 
-      user: { id: newUser.user.id, email, name, role } 
+    return new Response(JSON.stringify({
+      success: true,
+      user: { id: newUser.user.id, email, name, role }
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })

@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     // Decode JWT to get caller ID
     const token = authHeader.replace('Bearer ', '');
     const decoded = decodeJwt(token);
-    
+
     if (!decoded?.sub) {
       return new Response(JSON.stringify({ error: 'Invalid token' }), {
         status: 401,
@@ -54,14 +54,14 @@ Deno.serve(async (req) => {
     console.log('Caller ID:', callerId, 'Email:', decoded.email);
 
     // Check if caller is admin
-    const { data: roleData, error: roleError } = await supabaseAdmin
-      .from('user_roles')
+    const { data: userData, error: userError } = await supabaseAdmin
+      .from('users')
       .select('role')
-      .eq('user_id', callerId)
+      .eq('id', callerId)
       .single();
 
-    if (roleError || roleData?.role !== 'admin') {
-      console.log('Access denied. Role:', roleData?.role);
+    if (userError || userData?.role !== 'admin') {
+      console.log('Access denied. Role:', userData?.role);
       return new Response(JSON.stringify({ error: 'Admin access required' }), {
         status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     }
 
     const { userId } = await req.json();
-    
+
     if (!userId) {
       return new Response(JSON.stringify({ error: 'User ID required' }), {
         status: 400,
@@ -87,27 +87,11 @@ Deno.serve(async (req) => {
 
     console.log(`Deleting user: ${userId}`);
 
-    // Delete from user_roles first (if exists)
-    const { error: rolesDeleteError } = await supabaseAdmin
-      .from('user_roles')
-      .delete()
-      .eq('user_id', userId);
-    
-    if (rolesDeleteError) {
-      console.log('Error deleting from user_roles (may not exist):', rolesDeleteError.message);
-    }
-    
-    // Delete from users table (if exists)
-    const { error: usersDeleteError } = await supabaseAdmin
-      .from('users')
-      .delete()
-      .eq('id', userId);
-    
-    if (usersDeleteError) {
-      console.log('Error deleting from users (may not exist):', usersDeleteError.message);
-    }
-    
-    // Delete from auth.users (if exists)
+    // Não é necessário deletar manualmente da tabela users se tivermos ON DELETE CASCADE no banco,
+    // mas por segurança e para evitar erros de FK se o cascade não estiver perfeito...
+    // O ideal é deletar do AUTH primeiro, que cascateia para o PUBLIC.
+
+    // Delete from auth.users (if exists) -> Isso deve acionar o CASCADE para public.users
     const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId);
 
     if (deleteError) {

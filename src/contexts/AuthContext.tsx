@@ -25,30 +25,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Função para buscar dados do perfil no banco
+  const fetchProfile = async (userId: string, email: string, metadata: any) => {
+    try {
+      // Tenta buscar dados da tabela app_profiles
+      const { data, error } = await supabase
+        .from('app_profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (data) {
+        setUserData(data as User);
+        setRole(data.role as UserRole);
+      } else {
+        // Fallback se o usuário ainda não existir na tabela (ex: delay do trigger)
+        // O trigger agora é transparente e rápido, mas manter o fallback é bom.
+        setUserData({
+          id: userId,
+          email: email,
+          name: metadata?.name || '',
+          role: 'user',
+          created_at: new Date().toISOString()
+        } as User);
+        setRole('user');
+      }
+    } catch (error) {
+      console.error('Erro ao buscar perfil:', error);
+      // Fallback seguro
+      setRole('user');
+    }
+  };
+
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
-        
+
         if (session?.user) {
-          setTimeout(() => {
-            fetchUserData(session.user.id);
-          }, 0);
+          fetchProfile(session.user.id, session.user.email!, session.user.user_metadata);
         } else {
           setUserData(null);
           setRole(null);
-          setLoading(false);
         }
+        setLoading(false);
       }
     );
 
+    // Initial check
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      
       if (session?.user) {
-        fetchUserData(session.user.id);
+        fetchProfile(session.user.id, session.user.email!, session.user.user_metadata);
       } else {
         setLoading(false);
       }
@@ -56,36 +86,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => subscription.unsubscribe();
   }, []);
-
-  const fetchUserData = async (userId: string) => {
-    try {
-      // Buscar dados do usuário
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (userError) throw userError;
-
-      // Buscar role da tabela user_roles (mais seguro para RLS)
-      const { data: roleData } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      if (userData) {
-        setUserData(userData as User);
-        // Priorizar role de user_roles, fallback para users.role
-        setRole((roleData?.role as UserRole) || (userData as User).role || 'user');
-      }
-    } catch (error) {
-      console.error('Error fetching user data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const signIn = async (email: string, password: string) => {
     try {
