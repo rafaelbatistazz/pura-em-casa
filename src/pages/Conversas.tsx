@@ -1369,8 +1369,9 @@ export default function Conversas() {
                   variant="ghost"
                   size="icon"
                   className="relative h-9 w-9 touch-manipulation text-foreground hover:bg-secondary"
-                  onClick={() => {
-                    console.log('Force opening notes for lead:', selectedLead.id);
+                  onClick={(e) => {
+                    e.stopPropagation(); // Force click
+                    console.log('Mobile notes button clicked');
                     setEditingNotes(selectedLead.notes || '');
                     setNotesOpen(true);
                   }}
