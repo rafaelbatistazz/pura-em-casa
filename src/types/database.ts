@@ -21,6 +21,7 @@ export interface Lead {
   created_at: string;
   updated_at: string;
   notes?: string | null;
+  source?: string | null;
   users?: User;
 }
 
@@ -111,6 +112,7 @@ export interface Database {
           status?: LeadStatus;
           kanban_position?: number;
           notes?: string | null;
+          source?: string | null;
         };
         Update: {
           phone?: string;
@@ -120,6 +122,7 @@ export interface Database {
           kanban_position?: number;
           updated_at?: string;
           notes?: string | null;
+          source?: string | null;
         };
       };
       messages: {
@@ -187,6 +190,16 @@ export interface Database {
           content?: string;
           created_by?: string | null;
         };
+      };
+    };
+    Functions: {
+      check_lead_status: {
+        Args: { phone_number: string };
+        Returns: { exists: boolean; lead_id?: string; assigned_to_name?: string };
+      };
+      delete_user_by_id: {
+        Args: { user_id: string };
+        Returns: void;
       };
     };
   };

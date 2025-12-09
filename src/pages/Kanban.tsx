@@ -265,6 +265,7 @@ export default function Kanban() {
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [newLeadName, setNewLeadName] = useState('');
   const [newLeadPhone, setNewLeadPhone] = useState('');
+  const [newLeadSource, setNewLeadSource] = useState('');
   const [newLeadStatus, setNewLeadStatus] = useState<LeadStatusType>('novo');
   const [newLeadAssignedTo, setNewLeadAssignedTo] = useState<string>('');
   const [creatingLead, setCreatingLead] = useState(false);
@@ -274,6 +275,7 @@ export default function Kanban() {
   const [editingLead, setEditingLead] = useState<LeadWithUser | null>(null);
   const [editLeadName, setEditLeadName] = useState('');
   const [editLeadPhone, setEditLeadPhone] = useState('');
+  const [editLeadSource, setEditLeadSource] = useState('');
   const [editLeadStatus, setEditLeadStatus] = useState<LeadStatusType>('novo');
   const [editLeadAssignedTo, setEditLeadAssignedTo] = useState<string>('');
   const [editLeadNotes, setEditLeadNotes] = useState<string>('');
@@ -385,6 +387,7 @@ export default function Kanban() {
       const { error } = await supabase.from('leads').insert([{
         name: newLeadName,
         phone,
+        source: newLeadSource || null, // Add source
         status: newLeadStatus,
         assigned_to: newLeadAssignedTo && newLeadAssignedTo !== 'none' ? newLeadAssignedTo : (role === 'admin' ? null : user?.id),
       }] as never);
@@ -395,6 +398,7 @@ export default function Kanban() {
       setNewLeadOpen(false);
       setNewLeadName('');
       setNewLeadPhone('');
+      setNewLeadSource(''); // Reset source
       setNewLeadStatus('novo');
       setNewLeadAssignedTo('');
       fetchLeads();
@@ -410,6 +414,7 @@ export default function Kanban() {
     setEditingLead(lead);
     setEditLeadName(lead.name);
     setEditLeadPhone(lead.phone);
+    setEditLeadSource(lead.source || ''); // Populate source
     setEditLeadStatus(lead.status as LeadStatusType);
     setEditLeadAssignedTo(lead.assigned_to || 'none');
     setEditLeadNotes(lead.notes || '');
@@ -434,6 +439,7 @@ export default function Kanban() {
         .update({
           name: editLeadName,
           phone,
+          source: editLeadSource || null, // Update source
           status: editLeadStatus,
           assigned_to: editLeadAssignedTo && editLeadAssignedTo !== 'none' ? editLeadAssignedTo : null,
           notes: editLeadNotes || null,
@@ -659,6 +665,14 @@ export default function Kanban() {
                 onChange={(e) => setEditLeadPhone(e.target.value)}
                 placeholder="(11) 99999-9999"
                 disabled={role !== 'admin'}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Origem</Label>
+              <Input
+                value={editLeadSource}
+                onChange={(e) => setEditLeadSource(e.target.value)}
+                placeholder="Ex: Facebook, Instagram, Google"
               />
             </div>
             <div className="space-y-2">

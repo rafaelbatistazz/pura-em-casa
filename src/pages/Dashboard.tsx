@@ -247,22 +247,15 @@ export default function Dashboard() {
         {stats.map((stat, index) => (
           <Card key={index} className="border-border/50 animate-slide-in" style={{ animationDelay: `${index * 50}ms` }}>
             <CardContent className="p-4 lg:p-6">
-              {loading ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-8 w-8 lg:h-10 lg:w-10 rounded-lg" />
-                  <Skeleton className="h-6 lg:h-8 w-16 lg:w-20" />
-                  <Skeleton className="h-3 lg:h-4 w-20 lg:w-24" />
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs lg:text-sm text-muted-foreground">{stat.title}</p>
+                  <p className="text-xl lg:text-3xl font-bold mt-1">{stat.value}</p>
                 </div>
-              ) : (
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-xs lg:text-sm text-muted-foreground">{stat.title}</p>
-                    <p className="text-xl lg:text-3xl font-bold mt-1">{stat.value}</p>
-                  </div>
-                  <div className={`p-2 lg:p-3 rounded-lg ${stat.bgColor}`}>
-                    <stat.icon className={`h-4 w-4 lg:h-5 lg:w-5 ${stat.color}`} />
-                  </div>
+                <div className={`p-2 lg:p-3 rounded-lg ${stat.bgColor}`}>
+                  <stat.icon className={`h-4 w-4 lg:h-5 lg:w-5 ${stat.color}`} />
                 </div>
+              </div>
               )}
             </CardContent>
           </Card>
@@ -270,38 +263,32 @@ export default function Dashboard() {
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
-        <Card className="border-border/50">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base lg:text-lg">Leads por Hora</CardTitle>
+      {/* Charts */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+        <Card className="col-span-4 border-border/50">
+          <CardHeader>
+            <CardTitle>Leads por Hora</CardTitle>
           </CardHeader>
-          <CardContent className="pt-0">
-            {loading ? (
-              <Skeleton className="h-[250px] lg:h-[300px] w-full" />
-            ) : (
-              <ResponsiveContainer width="100%" height={250}>
+          <CardContent className="pl-2">
+            <div className="h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={leadsByHour}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis
                     dataKey="hour"
-                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
                     tickLine={false}
                     axisLine={false}
-                    interval={window.innerWidth < 640 ? 3 : 1}
+                    fontSize={12}
                   />
                   <YAxis
-                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
                     tickLine={false}
                     axisLine={false}
-                    width={30}
+                    fontSize={12}
+                    allowDecimals={false}
                   />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                    }}
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                    cursor={{ fill: 'transparent' }}
                   />
                   <Bar
                     dataKey="leads"
@@ -310,54 +297,41 @@ export default function Dashboard() {
                   />
                 </BarChart>
               </ResponsiveContainer>
-            )}
+            </div>
           </CardContent>
         </Card>
 
-        <Card className="border-border/50">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base lg:text-lg">Leads por Dia da Semana</CardTitle>
+        <Card className="col-span-3 border-border/50">
+          <CardHeader>
+            <CardTitle>Origem dos Leads</CardTitle>
           </CardHeader>
-          <CardContent className="pt-0">
-            {loading ? (
-              <Skeleton className="h-[250px] lg:h-[300px] w-full" />
-            ) : (
-              <ResponsiveContainer width="100%" height={250}>
-                <LineChart data={leadsByDay}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis
-                    dataKey="day"
-                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
+          <CardContent>
+            <div className="h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={leadsBySource}
+                  layout="vertical"
+                  margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" hide />
                   <YAxis
-                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                    dataKey="name"
+                    type="category"
+                    width={100}
+                    tick={{ fontSize: 12 }}
                     tickLine={false}
                     axisLine={false}
-                    width={30}
                   />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                    }}
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                    cursor={{ fill: 'transparent' }}
                   />
-                  <Line
-                    type="monotone"
-                    dataKey="leads"
-                    stroke="hsl(var(--primary))"
-                    strokeWidth={2}
-                    dot={{ fill: 'hsl(var(--primary))', strokeWidth: 2, r: 3 }}
-                  />
-                </LineChart>
+                  <Bar dataKey="value" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} barSize={32}>
+                  </Bar>
+                </BarChart>
               </ResponsiveContainer>
-            )}
+            </div>
           </CardContent>
         </Card>
       </div>
-    </div>
-  );
-}
