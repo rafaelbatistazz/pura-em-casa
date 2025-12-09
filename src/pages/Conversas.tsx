@@ -117,6 +117,7 @@ export default function Conversas() {
 
   // Notes modal
   const [notesOpen, setNotesOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [editingNotes, setEditingNotes] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
 
@@ -1430,20 +1431,45 @@ export default function Conversas() {
                 )}
 
                 {/* Admin: Delete Conversation */}
+                {/* Admin: Delete Conversation */}
                 {role === 'admin' && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                    onClick={() => {
-                      if (window.confirm('Tem certeza que deseja excluir esta conversa e todas as mensagens? Esta ação não pode ser desfeita.')) {
-                        handleDeleteConversation();
-                      }
-                    }}
-                    title="Excluir conversa"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                      onClick={() => setDeleteConfirmOpen(true)}
+                      title="Excluir conversa"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+
+                    <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Excluir conversa</DialogTitle>
+                          <DialogDescription>
+                            Tem certeza que deseja excluir esta conversa e todas as mensagens?
+                            Esta ação não pode ser desfeita.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+                            Cancelar
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            onClick={() => {
+                              setDeleteConfirmOpen(false);
+                              handleDeleteConversation();
+                            }}
+                          >
+                            Excluir
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </>
                 )}
 
                 {/* Notes Button - Independent */}
