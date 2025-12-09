@@ -755,7 +755,7 @@ export default function Conversas() {
         .from('leads')
         .select('*')
         .eq('phone', phone)
-        .single();
+        .maybeSingle();
 
       if (existingLead) {
         // Se já existe, só abre o lead existente (com aviso)
@@ -793,7 +793,7 @@ export default function Conversas() {
           updated_at: getSaoPauloTimestamp(),
         }])
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
 
