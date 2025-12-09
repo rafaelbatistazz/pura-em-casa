@@ -28,7 +28,7 @@ import {
 import { toast } from 'sonner';
 import {
   Search, Send, ArrowLeft, Plus, Loader2, UserCog, FileText,
-  ChevronDown, CheckCheck, Paperclip, Mic, Square, X, Image as ImageIcon, Play, Pause
+  ChevronDown, CheckCheck, Paperclip, Mic, Square, X, Image as ImageIcon, Play, Pause, MessageSquare
 } from 'lucide-react';
 import { useDebounce } from '@/hooks/useDebounce';
 import { MessageShortcuts } from '@/components/MessageShortcuts';
@@ -151,13 +151,14 @@ export default function Conversas() {
     if (!error && data) {
       const leadsWithMessages = await Promise.all(
         (data as Lead[]).map(async (lead) => {
-          const { data: lastMsgData } = await supabase
+          const { data: msgData } = await supabase
             .from('messages')
             .select('message_text, media_type, timestamp')
             .eq('lead_id', lead.id)
             .order('timestamp', { ascending: false })
-            .limit(1)
-            .single();
+            .limit(1);
+
+          const lastMsgData = (msgData as any)?.[0];
 
           const { count } = await supabase
             .from('messages')
@@ -764,7 +765,7 @@ export default function Conversas() {
         .insert([{
           name: newName,
           phone,
-          status: 'novo',
+          status: 'Novos Leads', // Corrected key matching statusLabels
           assigned_to: role === 'admin' ? null : user?.id,
           updated_at: getSaoPauloTimestamp(),
         }])
@@ -851,79 +852,87 @@ export default function Conversas() {
     setSavingNotes(false);
   };
 
-  const normalizeTimestamp = (timestamp: string) => {
+  const normalizeTimestamp = (timestamp: string | null | undefined) => {
     if (!timestamp) return new Date().toISOString();
 
-    // Check for Z or offset (+00:00, -0300) using regex
-    // Matches Z at end, or +XX:XX, or -XX:XX, or +XXXX, or -XXXX
-    if (/[Zz]|[+-]\d{2}:?\d{2}$/.test(timestamp)) {
-      return timestamp;
+    try {
+      // Check for Z or offset (+00:00, -0300) using regex
+      if (/[Zz]|[+-]\d{2}:?\d{2}$/.test(timestamp)) {
+        return timestamp;
+      }
+      return `${timestamp}Z`;
+    } catch {
+      return new Date().toISOString();
     }
-
-    // Otherwise assume it's UTC and append Z
-    return `${timestamp}Z`;
   };
-
-  // Gera timestamp ISO padrão (o banco converte para UTC e o front converte para SP na exibição)
-  // Gera timestamp ISO com offset explícito de São Paulo (UTC-3)
-  // Independente do fuso horário da máquina do usuário
-
 
   const formatRelativeTime = (timestamp: string) => {
     if (!timestamp) return '';
+    try {
+      const normalized = normalizeTimestamp(timestamp);
+      const date = new Date(normalized);
 
-    const normalized = normalizeTimestamp(timestamp);
-    const date = new Date(normalized);
-    const now = new Date();
+      // Check for Invalid Date
+      if (isNaN(date.getTime())) return '';
 
-    // Use absolute time difference in days to avoid timezone math complexity
-    const msPerDay = 86400000;
-    // Normalize both dates to midnight in local time (or consistently in one timezone) to compare "days"
-    const floorDate = new Date(date.toLocaleDateString('en-US', { timeZone: 'America/Sao_Paulo' }));
-    const floorNow = new Date(now.toLocaleDateString('en-US', { timeZone: 'America/Sao_Paulo' }));
+      const now = new Date();
+      const msPerDay = 86400000;
+      const floorDate = new Date(date.toLocaleDateString('en-US', { timeZone: 'America/Sao_Paulo' }));
+      const floorNow = new Date(now.toLocaleDateString('en-US', { timeZone: 'America/Sao_Paulo' }));
+      const daysDiff = Math.floor((floorNow.getTime() - floorDate.getTime()) / msPerDay);
 
-    const daysDiff = Math.floor((floorNow.getTime() - floorDate.getTime()) / msPerDay);
+      if (daysDiff === 0) {
+        return date.toLocaleTimeString('pt-BR', {
+          timeZone: 'America/Sao_Paulo',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        });
+      }
+      if (daysDiff === 1) return 'Ontem';
+      return date.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    } catch (e) {
+      console.error('Error formatting date:', e);
+      return '';
+    }
+  };
 
-    // Today: show HH:MM
-    if (daysDiff === 0) {
+  const formatTime = (timestamp: string) => {
+    try {
+      const normalized = normalizeTimestamp(timestamp);
+      const date = new Date(normalized);
+      if (isNaN(date.getTime())) return '--:--';
+
       return date.toLocaleTimeString('pt-BR', {
         timeZone: 'America/Sao_Paulo',
         hour: '2-digit',
         minute: '2-digit',
-        hour12: false
       });
+    } catch {
+      return '--:--';
     }
-
-    // Yesterday: show "Ontem"
-    if (daysDiff === 1) return 'Ontem';
-
-    // Older: show dd/MM/yyyy
-    return date.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-  };
-
-  const formatTime = (timestamp: string) => {
-    const normalized = normalizeTimestamp(timestamp);
-    const date = new Date(normalized);
-    return date.toLocaleTimeString('pt-BR', {
-      timeZone: 'America/Sao_Paulo',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
   };
 
   const getDateSeparator = (timestamp: string) => {
-    const date = new Date(normalizeTimestamp(timestamp));
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
+    try {
+      const normalized = normalizeTimestamp(timestamp);
+      const date = new Date(normalized);
+      if (isNaN(date.getTime())) return '';
 
-    const dateStr = date.toLocaleDateString('pt-BR', { timeZone: TIMEZONE });
-    const todayStr = today.toLocaleDateString('pt-BR', { timeZone: TIMEZONE });
-    const yesterdayStr = yesterday.toLocaleDateString('pt-BR', { timeZone: TIMEZONE });
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
 
-    if (dateStr === todayStr) return 'Hoje';
-    if (dateStr === yesterdayStr) return 'Ontem';
-    return dateStr;
+      const dateStr = date.toLocaleDateString('pt-BR', { timeZone: TIMEZONE });
+      const todayStr = today.toLocaleDateString('pt-BR', { timeZone: TIMEZONE });
+      const yesterdayStr = yesterday.toLocaleDateString('pt-BR', { timeZone: TIMEZONE });
+
+      if (dateStr === todayStr) return 'Hoje';
+      if (dateStr === yesterdayStr) return 'Ontem';
+      return dateStr;
+    } catch {
+      return '';
+    }
   };
 
   const getAvatarColor = (name: string | null) => {
@@ -1024,9 +1033,10 @@ export default function Conversas() {
 
     if (message.media_type === 'image') {
       // Proxy WhatsApp URLs to avoid CORS issues
-      const imageUrl = message.media_url?.includes('whatsapp.net')
-        ? `https://images.weserv.nl/?url=${encodeURIComponent(message.media_url)}`
-        : message.media_url;
+      const mediaUrl = message.media_url || '';
+      const imageUrl = mediaUrl.includes('whatsapp.net')
+        ? `https://images.weserv.nl/?url=${encodeURIComponent(mediaUrl)}`
+        : mediaUrl;
 
       return (
         <div
@@ -1294,9 +1304,9 @@ export default function Conversas() {
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button variant="ghost" size="sm" className="h-9 px-2 gap-1 touch-manipulation text-foreground hover:bg-secondary">
-                      <Badge className={cn('text-[10px] px-1.5', statusColors[selectedLead.status])}>
-                        <span className="hidden sm:inline">{statusLabels[selectedLead.status]}</span>
-                        <span className="sm:hidden">{statusLabels[selectedLead.status].slice(0, 3)}</span>
+                      <Badge className={cn('text-[10px] px-1.5', statusColors[selectedLead.status] || 'bg-secondary text-foreground')}>
+                        <span className="hidden sm:inline">{statusLabels[selectedLead.status] || selectedLead.status}</span>
+                        <span className="sm:hidden">{(statusLabels[selectedLead.status] || selectedLead.status || '').slice(0, 3)}</span>
                       </Badge>
                       <ChevronDown className="h-3 w-3" />
                     </Button>
@@ -1562,7 +1572,7 @@ export default function Conversas() {
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-4 chat-pattern">
             <div className="h-20 w-20 rounded-full bg-secondary flex items-center justify-center mb-4">
-              <MessageSquareIcon className="h-10 w-10 text-muted-foreground" />
+              <MessageSquare className="h-10 w-10 text-muted-foreground" />
             </div>
             <p className="text-lg font-medium text-foreground">Selecione uma conversa</p>
             <p className="text-muted-foreground">

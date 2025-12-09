@@ -242,26 +242,18 @@ export default function Config() {
     setUsers(users.filter(u => u.id !== userId));
 
     try {
-      // DELETE GLOBAL (Via Edge Function - se disponível)
-      // Se não tiver Edge Function, fazemos DELETE local no banco.
-      const { error: fnError } = await supabase.functions.invoke('delete-user', {
-        body: { userId }
+      // DELETE GLOBAL (Via RPC Function)
+      // Chama a função segura do banco que remove do auth.users e app_profiles
+      const { error } = await supabase.rpc('delete_user_by_id', {
+        user_id: userId
       });
 
-      if (fnError) {
-        // Fallback: Delete local
-        const { error: dbError } = await supabase
-          .from('app_profiles')
-          .delete()
-          .eq('id', userId);
-        if (dbError) throw dbError;
-      }
+      if (error) throw error;
 
-      toast.success('Usuário removido');
+      toast.success('Usuário removido do sistema');
     } catch (error: any) {
       console.error('Erro ao excluir usuário:', error);
-      // Se deu erro, revertemos a UI mas tentamos limpar do banco local de qualquer jeito
-      toast.error('Erro ao excluir usuário');
+      toast.error(error.message || 'Erro ao excluir usuário');
       setUsers(previousUsers);
     }
   };
@@ -302,19 +294,20 @@ export default function Config() {
       const { data, error } = await supabase
         .from('lead_distribution_config')
         .select('*')
-        .limit(1)
-        .single();
+        .limit(1);
 
-      if (error && error.code !== 'PGRST116') { // PGRST116 means no rows found
+      if (error) {
         console.error('Error fetching distribution config:', error);
         return;
       }
 
-      if (data) {
-        setLeadDistributionEnabled(data.enabled);
-        setDistributionConfigId(data.id);
+      const config = data?.[0];
+
+      if (config) {
+        setLeadDistributionEnabled(config.enabled);
+        setDistributionConfigId(config.id);
       } else {
-        // Create default if not exists (though migration should have created it)
+        // Create default if not exists
         const { data: newData, error: createError } = await supabase
           .from('lead_distribution_config')
           .insert({ enabled: false, last_assigned_index: 0 })

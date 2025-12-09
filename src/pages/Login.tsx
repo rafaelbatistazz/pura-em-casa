@@ -51,9 +51,9 @@ export default function Login() {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (authUser) {
         const { data: roleData } = await supabase
-          .from('user_roles')
+          .from('app_profiles')
           .select('role')
-          .eq('user_id', authUser.id)
+          .eq('id', authUser.id)
           .single();
 
         if (roleData?.role === 'admin') {
