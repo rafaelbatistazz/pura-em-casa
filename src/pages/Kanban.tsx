@@ -360,15 +360,16 @@ export default function Kanban() {
 
     setCreatingLead(true);
     try {
-      // PROACTIVE DUPLICATE CHECK
-      const { data: existingLead } = await supabase
-        .from('leads')
-        .select('id, name')
-        .eq('phone', phone)
-        .single();
+      // PROACTIVE DUPLICATE CHECK (Secure RPC)
+      const { data: checkData, error: checkError } = await supabase
+        .rpc('check_lead_status', { phone_number: phone });
 
-      if (existingLead) {
-        toast.error(`Telefone já cadastrado! Cliente: ${existingLead.name}`);
+      if (checkError) throw checkError;
+
+      const result = checkData as { exists: boolean; lead_id?: string; assigned_to_name?: string };
+
+      if (result.exists) {
+        toast.error(`Telefone já cadastrado! Cliente: ${result.assigned_to_name}`);
         setCreatingLead(false);
         return;
       }
