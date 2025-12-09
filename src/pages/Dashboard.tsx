@@ -124,6 +124,19 @@ export default function Dashboard() {
     ).length,
   }));
 
+  // Group leads by source
+  const leadsBySource = useMemo(() => {
+    const sourceCount: Record<string, number> = {};
+    filteredLeads.forEach((lead) => {
+      const source = lead.source || 'Sem fonte';
+      sourceCount[source] = (sourceCount[source] || 0) + 1;
+    });
+
+    return Object.entries(sourceCount)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [filteredLeads]);
+
   const stats = [
     {
       title: 'Total de Leads',
