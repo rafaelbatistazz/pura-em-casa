@@ -28,7 +28,7 @@ import {
 import { toast } from 'sonner';
 import {
   Search, Send, ArrowLeft, Plus, Loader2, UserCog, FileText,
-  ChevronDown, CheckCheck, Paperclip, Mic, Square, X, Image as ImageIcon, Play, Pause, MessageSquare
+  ChevronDown, CheckCheck, Paperclip, Mic, Square, X, Image as ImageIcon, Play, Pause, MessageSquare, Trash2
 } from 'lucide-react';
 import { useDebounce } from '@/hooks/useDebounce';
 import { MessageShortcuts } from '@/components/MessageShortcuts';
@@ -832,6 +832,27 @@ export default function Conversas() {
     }
   };
 
+  const handleDeleteConversation = async () => {
+    if (!selectedLead) return;
+
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .delete()
+        .eq('id', selectedLead.id);
+
+      if (error) throw error;
+
+      toast.success('Conversa excluída com sucesso');
+      setLeads(prev => prev.filter(l => l.id !== selectedLead.id));
+      setSelectedLead(null);
+      setShowMobileChat(false);
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      toast.error('Erro ao excluir conversa');
+    }
+  };
+
   const handleSaveNotes = async () => {
     if (!selectedLead) return;
 
@@ -1372,6 +1393,23 @@ export default function Conversas() {
                       </div>
                     </PopoverContent>
                   </Popover>
+                )}
+
+                {/* Admin: Delete Conversation */}
+                {role === 'admin' && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                    onClick={() => {
+                      if (window.confirm('Tem certeza que deseja excluir esta conversa e todas as mensagens? Esta ação não pode ser desfeita.')) {
+                        handleDeleteConversation();
+                      }
+                    }}
+                    title="Excluir conversa"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 )}
 
                 {/* Notes Button - Independent */}
