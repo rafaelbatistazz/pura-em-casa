@@ -751,49 +751,56 @@ export default function Conversas() {
 
     setCreatingConversation(true);
     try {
-      const { data: existingLead } = await supabase
-        .from('leads')
-        .select('*')
-        .eq('phone', phone)
-        .maybeSingle();
+      // 1. Check if lead exists using Secure RPC (bypasses RLS visibility)
+      const { data: checkData, error: checkError } = await supabase
+        .rpc('check_lead_status', { phone_number: phone });
 
-      if (existingLead) {
-        // Se já existe, só abre o lead existente (com aviso)
-        toast.info(`Telefone já cadastrado! Abrindo: ${existingLead.name}`);
-        setNewConversationOpen(false);
-        setNewPhone('');
-        setNewName('');
+      if (checkError) throw checkError;
 
-        // Seleciona o lead existente
-        // Precisamos garantir que ele está na lista visual
-        const leadWithDetails = {
-          ...existingLead,
-          last_message: '',
-          unread_count: 0
-        };
+      const result = checkData as { exists: boolean; lead_id?: string; assigned_to_name?: string };
 
-        // Adiciona à lista se não estiver e seleciona
-        setLeads(prev => {
-          if (prev.some(l => l.id === existingLead.id)) return prev;
-          return [leadWithDetails as any, ...prev];
-        });
+      if (result.exists && result.lead_id) {
+        // 2. Lead exists. Can we see it? (RLS check)
+        // Try to fetch it standard way
+        const { data: visibleLead } = await supabase
+          .from('leads')
+          .select('*')
+          .eq('id', result.lead_id)
+          .maybeSingle();
 
-        setTimeout(() => setSelectedLead(leadWithDetails as any), 100);
-        return;
+        if (visibleLead) {
+          // We own it or are admin -> Open it
+          toast.info(`Telefone já cadastrado! Abrindo conversa...`);
+          setNewConversationOpen(false);
+          setNewPhone('');
+          setNewName('');
+
+          const leadWithDetails = { ...visibleLead, last_message: '', unread_count: 0 };
+          setLeads(prev => {
+            if (prev.some(l => l.id === visibleLead.id)) return prev;
+            return [leadWithDetails as any, ...prev];
+          });
+          setTimeout(() => setSelectedLead(leadWithDetails as any), 100);
+          return;
+        } else {
+          // We CANNOT see it -> It belongs to someone else
+          toast.error(`Este telefone já está cadastrado com: ${result.assigned_to_name}`);
+          return; // Stop here, don't try to insert
+        }
       }
 
-      // Create new lead if doesn't exist
+      // 3. Lead does not exist -> Create it
       const { data: newLead, error } = await supabase
         .from('leads')
         .insert([{
           name: newName,
           phone,
-          status: 'Novos Leads', // Corrected key matching statusLabels
+          status: 'Novos Leads',
           assigned_to: role === 'admin' ? null : user?.id,
           updated_at: getSaoPauloTimestamp(),
         }])
         .select()
-        .maybeSingle();
+        .single();
 
       if (error) throw error;
 
@@ -806,9 +813,13 @@ export default function Conversas() {
         setNewName('');
         toast.success('Novo lead criado!');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating conversation:', error);
-      toast.error('Erro ao criar conversa');
+      if (error.code === '42501') {
+        toast.error('Sem permissão para criar leads.');
+      } else {
+        toast.error(error.message || 'Erro ao criar conversa');
+      }
     } finally {
       setCreatingConversation(false);
     }
