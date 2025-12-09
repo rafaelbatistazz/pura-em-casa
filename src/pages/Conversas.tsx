@@ -420,6 +420,29 @@ export default function Conversas() {
             });
           }
         )
+        // Listener para remoção de Leads (Sync de Exclusão)
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'leads'
+          },
+          (payload) => {
+            console.log('⚡ Lead deleted:', payload.old);
+            const deletedId = payload.old.id;
+
+            // Remove da lista
+            setLeads(prev => prev.filter(l => l.id !== deletedId));
+
+            // Se for o lead aberto, fecha o chat
+            if (selectedLead?.id === deletedId) {
+              setSelectedLead(null);
+              setShowMobileChat(false);
+              toast.info('Esta conversa foi excluída');
+            }
+          }
+        )
         .subscribe();
 
       return () => {
