@@ -269,13 +269,11 @@ export default function Dashboard() {
                   <stat.icon className={`h-4 w-4 lg:h-5 lg:w-5 ${stat.color}`} />
                 </div>
               </div>
-              )}
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* Charts */}
       {/* Charts */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
         <Card className="col-span-4 border-border/50">
