@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { normalizePhone } from '@/lib/phoneUtils';
+import { normalizePhone, maskPhone } from '@/lib/phoneUtils';
 import { cn, getSaoPauloTimestamp } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -1349,9 +1349,9 @@ export default function Conversas() {
                   {getInitials(selectedLead.name)}
                 </AvatarFallback>
               </Avatar>
-              <div className="flex-1 min-w-0 mr-1">
-                <p className="font-medium truncate text-sm text-foreground leading-tight">{selectedLead.name}</p>
-                <p className="text-xs text-muted-foreground truncate">{selectedLead.phone}</p>
+              <div className="min-w-0">
+                <p className="font-medium truncate text-sm text-foreground leading-tight">{selectedLead.name || displayPhone(selectedLead.phone)}</p>
+                <p className="text-xs text-muted-foreground truncate">{selectedLead.name ? displayPhone(selectedLead.phone) : ''}</p>
               </div>
 
               {/* Actions */}

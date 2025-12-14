@@ -70,3 +70,33 @@ export function normalizePhone(phone: string): string {
 // normalizePhone("5571992894634") → "5571992894634"
 // normalizePhone("+55 71 99289-4634") → "5571992894634"
 // normalizePhone("1234567890") → "1234567890" (international)
+
+export function maskPhone(phone: string): string {
+    if (!phone) return '';
+
+    // Normalize first to ensure we have a standard format to work with
+    const clean = phone.replace(/\D/g, '');
+
+    // Check for Brazilian format: 55 + 2 DDD + 9 digits (13 chars total)
+    // or 55 + 2 DDD + 8 digits (12 chars total)
+    if (clean.startsWith('55') && (clean.length === 12 || clean.length === 13)) {
+        const ddd = clean.substring(2, 4);
+        const number = clean.substring(4);
+
+        if (number.length === 9) { // 9 digits
+            const firstPart = number.substring(0, 1);
+            const lastPart = number.substring(5);
+            return `(${ddd}) ${firstPart}****-${lastPart}`;
+        } else if (number.length === 8) { // 8 digits
+            const lastPart = number.substring(4);
+            return `(${ddd}) ****-${lastPart}`;
+        }
+    }
+
+    // Fallback for other formats: Show first 2 and last 2 chars
+    if (clean.length > 4) {
+        return `${clean.substring(0, 2)}****${clean.substring(clean.length - 2)}`;
+    }
+
+    return '****';
+}

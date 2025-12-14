@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { normalizePhone } from '@/lib/phoneUtils';
+import { normalizePhone, maskPhone } from '@/lib/phoneUtils';
 import { cn, getSaoPauloTimestamp, formatDisplayTime } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -148,6 +148,8 @@ function SortableLeadCard({ lead, onEdit }: SortableLeadCardProps) {
 }
 
 function LeadCard({ lead, onEdit }: { lead: LeadWithUser; onEdit: (lead: LeadWithUser) => void }) {
+  const { role } = useAuth();
+
   const getAvatarColor = (name: string) => {
     const index = name.charCodeAt(0) % avatarColors.length;
     return avatarColors[index];
@@ -173,6 +175,10 @@ function LeadCard({ lead, onEdit }: { lead: LeadWithUser; onEdit: (lead: LeadWit
   };
 
   const formatPhone = (phone: string) => {
+    if (role !== 'admin') {
+      return maskPhone(phone);
+    }
+
     const cleaned = phone.replace(/\D/g, '');
     if (cleaned.length === 13) {
       return `+${cleaned.slice(0, 2)} (${cleaned.slice(2, 4)}) ${cleaned.slice(4, 9)}-${cleaned.slice(9)}`;
