@@ -88,6 +88,13 @@ interface LeadWithMessages extends Lead {
 
 export default function Conversas() {
   const { user, role } = useAuth();
+
+  // Helper to display phone
+  const displayPhone = (phone: string) => {
+    if (role === 'admin') return phone;
+    return maskPhone(phone);
+  };
+
   const [leads, setLeads] = useState<LeadWithMessages[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedLead, setSelectedLead] = useState<LeadWithMessages | null>(null);
