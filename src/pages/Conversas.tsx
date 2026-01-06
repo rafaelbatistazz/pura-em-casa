@@ -109,6 +109,13 @@ export default function Conversas() {
   const [showMobileChat, setShowMobileChat] = useState(false);
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
 
+  // Ref to track selected lead inside stale closures of useEffect
+  const selectedLeadRef = useRef<LeadWithMessages | null>(null);
+
+  useEffect(() => {
+    selectedLeadRef.current = selectedLead;
+  }, [selectedLead]);
+
   // Shortcuts
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [shortcutSearch, setShortcutSearch] = useState('');
@@ -210,12 +217,10 @@ export default function Conversas() {
 
     if (!error && data) {
       setMessages(data as Message[]);
-      await supabase
-        .from('messages')
-        .update({ read: true } as never)
-        .eq('lead_id', leadId)
-        .eq('direction', 'inbound')
-        .eq('read', false);
+
+
+      // Use RPC instead of direct update to bypass potential RLS issues
+      await supabase.rpc('mark_messages_read', { p_lead_id: leadId });
 
       setLeads((prev) =>
         prev.map((lead) =>
@@ -329,13 +334,32 @@ export default function Conversas() {
                 else if (newMessage.media_type === 'video') lastMessage = '🎬 Vídeo';
                 else if (newMessage.media_type === 'document') lastMessage = '📄 Documento';
 
+                // Check if this lead is currently currently open using the ref
+                const isCurrentConversation = selectedLeadRef.current?.id === newMessage.lead_id;
+
+                // Should we increment unread count?
+                // Only if it's inbound, unread, AND NOT the current conversation
+                const shouldIncrement = newMessage.direction === 'inbound' &&
+                  !newMessage.read &&
+                  !isCurrentConversation;
+
+                // Use effect side-effect: If it IS the current conversation, mark as read in DB immediately
+                // Use effect side-effect: If it IS the current conversation, mark as read in DB immediately
+                if (isCurrentConversation && newMessage.direction === 'inbound' && !newMessage.read) {
+                  supabase.rpc('mark_messages_read', { p_lead_id: newMessage.lead_id })
+                    .then(({ error }) => {
+                      if (error) console.error('Error marking new message as read:', error);
+                    });
+                }
+
                 return {
                   ...lead,
                   last_message: lastMessage,
                   last_message_time: newMessage.timestamp,
-                  unread_count: newMessage.direction === 'inbound' && !newMessage.read
+                  unread_count: shouldIncrement
                     ? (lead.unread_count || 0) + 1
-                    : lead.unread_count,
+                    : lead.unread_count, // Reset to 0 if open? No, keep as is (fetchMessages clears it), or 0? 
+                  // fetchMessages clears it on open. If we are already open, it stays 0.
                   updated_at: newMessage.timestamp
                 };
               }
