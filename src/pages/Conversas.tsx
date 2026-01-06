@@ -624,10 +624,7 @@ export default function Conversas() {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (showShortcuts) return;
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
+    // Enter key sends removed intentionally to allow line breaks on all devices
   };
 
   // Media handling
