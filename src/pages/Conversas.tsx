@@ -1108,7 +1108,7 @@ export default function Conversas() {
   };
 
   return (
-    <div className="h-full flex bg-background">
+    <div className="h-full flex bg-background overflow-hidden relative">
       {/* Conversations Sidebar - Always visible on desktop (md+), hidden on mobile when chat is open */}
       <div
         className={cn(
@@ -1292,7 +1292,7 @@ export default function Conversas() {
           'flex-1 min-w-0 h-full grid grid-rows-[auto_1fr_auto]',
           'hidden', // Hidden by default
           'md:grid', // Always shown on desktop (side by side with list)
-          showMobileChat && 'grid fixed inset-0 h-[100dvh] z-[60] bg-background md:relative md:z-auto md:h-full' // Fullscreen on mobile (dvh for keyboard), normal on desktop
+          showMobileChat && 'grid fixed inset-0 h-[100dvh] w-full max-w-full overflow-hidden grid-cols-1 z-[60] bg-background md:relative md:z-auto md:h-full' // Fullscreen on mobile (dvh for keyboard), normal on desktop
         )}
       >
         {selectedLead ? (
@@ -1459,7 +1459,7 @@ export default function Conversas() {
             </div>
 
             {/* Messages */}
-            <div className="min-h-0 overflow-y-auto px-3 py-3 space-y-2 scrollbar-thin overscroll-contain chat-pattern">
+            <div className="min-h-0 w-full max-w-full overflow-y-auto px-3 py-3 space-y-2 scrollbar-thin overscroll-contain chat-pattern">
               {loadingMessages ? (
                 <div className="space-y-3">
                   {[...Array(5)].map((_, i) => (
@@ -1496,12 +1496,13 @@ export default function Conversas() {
                     >
                       <div
                         className={cn(
-                          'max-w-[85%] md:max-w-[70%] px-3 py-2 animate-scale-in shadow-sm',
+                          'max-w-[80%] sm:max-w-[85%] md:max-w-[70%] px-3 py-2 animate-scale-in shadow-sm break-words',
                           item.message.direction === 'outbound'
                             ? 'message-bubble-outbound'
                             : 'message-bubble-inbound',
                           item.message.id.startsWith('temp-') && 'opacity-70'
                         )}
+                        style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
                       >
                         {item.message.direction === 'inbound' && item.message.sender_name !== selectedLead.name && (
                           <p className="text-xs font-medium text-primary mb-1">
@@ -1595,7 +1596,7 @@ export default function Conversas() {
                     )}
                   </Button>
 
-                  <div className="flex-1 relative">
+                  <div className="flex-1 relative min-w-0">
                     <textarea
                       ref={textareaRef}
                       value={inputText}
