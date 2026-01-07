@@ -358,66 +358,24 @@ export default function Conversas() {
                   last_message_time: newMessage.timestamp,
                   unread_count: shouldIncrement
                     ? (lead.unread_count || 0) + 1
-                    : lead.unread_count, // Reset to 0 if open? No, keep as is (fetchMessages clears it), or 0? 
-                  // fetchMessages clears it on open. If we are already open, it stays 0.
+                    : lead.unread_count,
                   updated_at: newMessage.timestamp
                 };
               }
               return lead;
             });
 
-            // Re-sort to put newest conversations first
-            return updated.sort((a, b) =>
-              new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-            );
-          });
-        }
-      )
-      .subscribe((status) => {
-        console.log('Global subscription status:', status); // Connection status log
-      });
-
-    return () => {
-      console.log('Cleaning up global subscription');
-      supabase.removeChannel(globalChannel);
-    };
-  }, [role, user?.id]);
-
-  useEffect(() => {
-    if (selectedLead) {
-      fetchMessages(selectedLead.id);
-
-      // Global message listener replacement (more robust)
-      const channel = supabase
-        .channel('global-messages')
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'messages'
-          },
-          async (payload) => {
-            const newMessage = payload.new as Message;
-
-            // Debug Realtime
-            console.log('⚡ Realtime received:', newMessage);
-
             // Update messages list if it belongs to current conversation
-            if (selectedLead && newMessage.lead_id === selectedLead.id) {
+            if (selectedLeadRef.current && newMessage.lead_id === selectedLeadRef.current.id) {
               setMessages((prev) => {
                 // Deduplicação Inteligente:
-                // Ignora se o ID já existe
                 const idExists = prev.some(m => m.id === newMessage.id);
                 if (idExists) return prev;
 
-                // Ignora se for duplicata de envio (Outbound + Mesmo Texto + Recente)
-                // Isso resolve o problema de ter inserção Local + Inserção Webhook
                 if (newMessage.direction === 'outbound') {
                   const contentDuplicate = prev.some(m =>
                     m.direction === 'outbound' &&
                     m.message_text === newMessage.message_text &&
-                    // Verifica se foi nos últimos 60 segundos (margem segura)
                     Math.abs(new Date(m.timestamp).getTime() - new Date(newMessage.timestamp).getTime()) < 60000
                   );
                   if (contentDuplicate) return prev;
@@ -437,49 +395,26 @@ export default function Conversas() {
               });
             }
 
-            // Update conversation list sort order
-            setLeads((prevLeads) => {
-              return prevLeads.map(lead => {
-                if (lead.id === newMessage.lead_id) {
-                  return {
-                    ...lead,
-                    updated_at: newMessage.timestamp, // Use message time for sorting
-                    last_message: newMessage.media_type ? `[${newMessage.media_type}]` : newMessage.message_text
-                  };
-                }
-                return lead;
-              }).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-            });
-          }
-        )
-        // Listener para remoção de Leads (Sync de Exclusão)
-        .on(
-          'postgres_changes',
-          {
-            event: 'DELETE',
-            schema: 'public',
-            table: 'leads'
-          },
-          (payload) => {
-            console.log('⚡ Lead deleted:', payload.old);
-            const deletedId = payload.old.id;
+            // Re-sort to put newest conversations first
+            return updated.sort((a, b) =>
+              new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+            );
+          });
+        }
+      )
+      .subscribe((status) => {
+        console.log('Global subscription status:', status);
+      });
 
-            // Remove da lista
-            setLeads(prev => prev.filter(l => l.id !== deletedId));
+    return () => {
+      console.log('Cleaning up global subscription');
+      supabase.removeChannel(globalChannel);
+    };
+  }, [role, user?.id]);
 
-            // Se for o lead aberto, fecha o chat
-            if (selectedLead?.id === deletedId) {
-              setSelectedLead(null);
-              setShowMobileChat(false);
-              toast.info('Esta conversa foi excluída');
-            }
-          }
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
+  useEffect(() => {
+    if (selectedLead) {
+      fetchMessages(selectedLead.id);
     }
   }, [selectedLead]);
 
@@ -1357,33 +1292,36 @@ export default function Conversas() {
           'flex-1 min-w-0 h-full grid grid-rows-[auto_1fr_auto]',
           'hidden', // Hidden by default
           'md:grid', // Always shown on desktop (side by side with list)
-          showMobileChat && 'grid fixed inset-0 z-[60] bg-background md:relative md:z-auto' // Fullscreen on mobile, normal on desktop
+          showMobileChat && 'grid fixed inset-0 h-[100dvh] z-[60] bg-background md:relative md:z-auto md:h-full' // Fullscreen on mobile (dvh for keyboard), normal on desktop
         )}
       >
         {selectedLead ? (
           <>
             {/* Chat Header - Fixed */}
-            <div className="relative px-2 py-2 md:px-4 md:py-2.5 border-b border-border flex items-center gap-2 md:gap-3 bg-card safe-area-top z-[100]">
-              <Button
-                variant="default"
-                size="icon"
-                onClick={handleMobileBack}
-                className="md:hidden h-11 w-11 min-w-[44px] touch-manipulation shrink-0 bg-primary hover:bg-primary/90"
-              >
-                <ArrowLeft className="h-7 w-7 text-primary-foreground" />
-              </Button>
-              <Avatar className={cn('h-10 w-10 shrink-0', getAvatarColor(selectedLead.name))}>
-                <AvatarFallback className="text-primary-foreground font-medium text-sm">
-                  {getInitials(selectedLead.name)}
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0">
-                <p className="font-medium truncate text-sm text-foreground leading-tight">{selectedLead.name || displayPhone(selectedLead.phone)}</p>
-                <p className="text-xs text-muted-foreground truncate">{selectedLead.name ? displayPhone(selectedLead.phone) : ''}</p>
+            <div className="relative px-2 py-2 md:px-4 md:py-2.5 border-b border-border flex items-center justify-between bg-card safe-area-top z-[100]">
+              {/* Left Group: Back + Avatar + Info */}
+              <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1 mr-2">
+                <Button
+                  variant="default"
+                  size="icon"
+                  onClick={handleMobileBack}
+                  className="md:hidden h-10 w-10 min-w-[40px] touch-manipulation shrink-0 bg-primary hover:bg-primary/90 rounded-full"
+                >
+                  <ArrowLeft className="h-5 w-5 text-primary-foreground" />
+                </Button>
+                <Avatar className={cn('h-10 w-10 shrink-0', getAvatarColor(selectedLead.name))}>
+                  <AvatarFallback className="text-primary-foreground font-medium text-sm">
+                    {getInitials(selectedLead.name)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium truncate text-sm text-foreground leading-tight">{selectedLead.name || displayPhone(selectedLead.phone)}</p>
+                  <p className="text-xs text-muted-foreground truncate">{selectedLead.name ? displayPhone(selectedLead.phone) : ''}</p>
+                </div>
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 {/* Status Selector */}
                 <Popover>
                   <PopoverTrigger asChild>
