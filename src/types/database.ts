@@ -191,6 +191,38 @@ export interface Database {
           created_by?: string | null;
         };
       };
+      kanban_columns: {
+        Row: {
+          id: string;
+          status_id: string;
+          title: string;
+          color: string | null;
+          position: number;
+          usage_limit: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          status_id: string;
+          title: string;
+          color?: string | null;
+          position: number;
+          usage_limit?: number | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          status_id?: string;
+          title?: string;
+          color?: string | null;
+          position?: number;
+          usage_limit?: number | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
     };
     Functions: {
       check_lead_status: {
