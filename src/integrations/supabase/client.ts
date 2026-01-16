@@ -3,8 +3,9 @@ import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
 // Fallback to hardcoded values if env vars are missing (Force fix)
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://uxmuncibtisjsopvvuds.supabase.co";
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV4bXVuY2lidGlzanNvcHZ2dWRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ5Njg5OTAsImV4cCI6MjA4MDU0NDk5MH0.vCmq0V7Rw0qYz-iDBLQqL05deD_4ILC4nbBZtV2xeR4";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://ragnzmmnqtogmodkfayj.supabase.co";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJhZ256bW1ucXRvZ21vZGtmYXlqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODQwMDYzNSwiZXhwIjoyMDgzOTc2NjM1fQ.QygPn4fvslB0HEHvVHNGry0L3lRTrQnvFCloqaUzQfk";
+console.log('Supabase Client Initialized with:', { SUPABASE_URL });
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";

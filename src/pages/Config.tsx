@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn, getSaoPauloTimestamp } from '@/lib/utils';
+import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -48,10 +49,11 @@ import {
   EyeOff,
   Loader2,
   Pencil,
-  Webhook,
   TestTube,
   Command,
   LogOut,
+  Bot,
+  Brain,
 } from 'lucide-react';
 import type { User as UserType, UserRole, SystemConfig, MessageShortcut, LeadDistribution, LeadDistributionConfig } from '@/types/database';
 
@@ -89,18 +91,20 @@ export default function Config() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
+  // Evolution API Constants
+  const EVOLUTION_API_URL = 'https://evo.advfunnel.com.br';
+  const EVOLUTION_API_KEY = 'ESWH6B36nhfW3apMfQQAv3SU2CthsZCg';
+
   // Profile edit
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
 
-  // Edit Evolution credentials
-  const [editCredentialsOpen, setEditCredentialsOpen] = useState(false);
-  const [editApiUrl, setEditApiUrl] = useState('');
-  const [editApiKey, setEditApiKey] = useState('');
-  const [editInstanceName, setEditInstanceName] = useState('');
-  const [editInstancePhone, setEditInstancePhone] = useState('');
-  const [savingCredentials, setSavingCredentials] = useState(false);
+  // New Instance Form
+  const [newInstanceOpen, setNewInstanceOpen] = useState(false);
+  const [newInstanceName, setNewInstanceName] = useState('');
+  const [creatingInstance, setCreatingInstance] = useState(false);
+  const [instanceName, setInstanceName] = useState('');
 
   // Lead Distribution
   const [leadDistributionEnabled, setLeadDistributionEnabled] = useState(false);
@@ -112,6 +116,18 @@ export default function Config() {
   const [webhookOutgoing, setWebhookOutgoing] = useState('');
   const [savingWebhooks, setSavingWebhooks] = useState(false);
   const [testingWebhook, setTestingWebhook] = useState(false);
+
+  // AI Settings
+  const [aiSettings, setAiSettings] = useState({
+    model: 'gpt-4o-mini',
+    system_prompt: 'Você é um assistente virtual experiente, amigável e focado em vendas.',
+    temperature: 0.5,
+    max_tokens: 1000,
+    top_p: 1,
+    frequency_penalty: 0,
+    presence_penalty: 0
+  });
+  const [savingAi, setSavingAi] = useState(false);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -265,16 +281,20 @@ export default function Config() {
 
     if (!error && data) {
       setConfigs(data as SystemConfig[]);
-      const apiUrl = (data as SystemConfig[]).find((c) => c.key === 'evolution_api_url')?.value || '';
-      const apiKey = (data as SystemConfig[]).find((c) => c.key === 'evolution_api_key')?.value || '';
-      const instanceName = (data as SystemConfig[]).find((c) => c.key === 'evolution_instance_name')?.value || '';
-      const instancePhone = (data as SystemConfig[]).find((c) => c.key === 'evolution_instance_phone')?.value || '';
-      setEditApiUrl(apiUrl);
-      setEditApiKey(apiKey);
-      setEditInstanceName(instanceName);
-      setEditInstancePhone(instancePhone);
+      const savedInstanceName = (data as SystemConfig[]).find((c) => c.key === 'evolution_instance_name')?.value || '';
+      setInstanceName(savedInstanceName);
       setWebhookIncoming((data as SystemConfig[]).find((c) => c.key === 'webhook_incoming_url')?.value || '');
       setWebhookOutgoing((data as SystemConfig[]).find((c) => c.key === 'webhook_outgoing_url')?.value || '');
+
+      const aiConfig = (data as SystemConfig[]).find((c) => c.key === 'ai_settings')?.value;
+      if (aiConfig) {
+        try {
+          const parsed = JSON.parse(aiConfig);
+          setAiSettings(prev => ({ ...prev, ...parsed }));
+        } catch (e) {
+          console.error('Error parsing AI settings', e);
+        }
+      }
     }
   }, []);
 
@@ -455,18 +475,14 @@ export default function Config() {
   }, [userData, role, fetchUsers, fetchConfigs, fetchShortcuts, fetchDistributionConfig, fetchDistributionUsers]);
 
   const checkConnectionStatus = useCallback(async () => {
-    const apiUrl = configs.find((c) => c.key === 'evolution_api_url')?.value;
-    const apiKey = configs.find((c) => c.key === 'evolution_api_key')?.value;
-    const instanceName = configs.find((c) => c.key === 'evolution_instance_name')?.value;
-
-    if (!apiUrl || !apiKey || !instanceName) {
+    if (!instanceName) {
       setConnectionStatus('disconnected');
       return;
     }
 
     try {
-      const response = await fetch(`${apiUrl}/instance/connectionState/${instanceName}`, {
-        headers: { apikey: apiKey },
+      const response = await fetch(`${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`, {
+        headers: { apikey: EVOLUTION_API_KEY },
       });
       const data = await response.json();
 
@@ -477,41 +493,35 @@ export default function Config() {
         setConnectionStatus('disconnected');
       }
     } catch {
-      // Silently fail
       setConnectionStatus('disconnected');
     }
-  }, [configs]);
+  }, [instanceName]);
 
   useEffect(() => {
-    if (configs.length > 0) {
+    if (instanceName) {
       checkConnectionStatus();
       const interval = setInterval(checkConnectionStatus, 5000);
       return () => clearInterval(interval);
     }
-  }, [configs, checkConnectionStatus]);
+  }, [instanceName, checkConnectionStatus]);
 
   const generateQRCode = async () => {
-    const apiUrl = configs.find((c) => c.key === 'evolution_api_url')?.value;
-    const apiKey = configs.find((c) => c.key === 'evolution_api_key')?.value;
-    const instanceName = configs.find((c) => c.key === 'evolution_instance_name')?.value;
+    if (!instanceName) return;
 
-    if (!apiUrl || !apiKey || !instanceName) {
-      toast.error('Configure as credenciais da API primeiro');
-      setCredentialsOpen(true);
-      return;
-    }
-
-    setConnectionStatus('connecting');
     setConnectionStatus('connecting');
     try {
-      const response = await fetch(`${apiUrl}/instance/connect/${instanceName}`, {
-        headers: { apikey: apiKey },
+      const response = await fetch(`${EVOLUTION_API_URL}/instance/connect/${instanceName}`, {
+        headers: { apikey: EVOLUTION_API_KEY },
       });
 
       const data = await response.json();
 
+      console.log('QR Code Response:', data); // Debug log
+
       if (data.qrcode?.base64) {
         setQrCode(data.qrcode.base64);
+      } else if (data.base64) {
+        setQrCode(data.base64);
       } else if (data.instance?.state === 'open') {
         setConnectionStatus('connected');
         toast.success('WhatsApp conectado!');
@@ -523,41 +533,101 @@ export default function Config() {
     }
   };
 
-  const handleSaveCredentials = async () => {
-    if (!editApiUrl || !editApiKey || !editInstanceName) {
-      toast.error('Preencha todos os campos');
+  const handleCreateInstance = async () => {
+    if (!newInstanceName) {
+      toast.error('Digite um nome para o WhatsApp');
       return;
     }
 
-    setSavingCredentials(true);
+    setCreatingInstance(true);
     try {
-      const credentials = [
-        { key: 'evolution_api_url', value: editApiUrl },
-        { key: 'evolution_api_key', value: editApiKey },
-        { key: 'evolution_instance_name', value: editInstanceName },
-      ];
+      // 1. Create Instance in Evolution
+      const response = await fetch(`${EVOLUTION_API_URL}/instance/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: EVOLUTION_API_KEY,
+        },
+        body: JSON.stringify({
+          instanceName: newInstanceName,
+          token: crypto.randomUUID(), // Secure random token
+          qrcode: true,
+          integration: 'WHATSAPP-BAILEYS',
+        }),
+      });
 
-      for (const cred of credentials) {
-        const existing = configs.find(c => c.key === cred.key);
-        if (existing) {
-          await supabase
-            .from('system_config')
-            .update({ value: cred.value } as never)
-            .eq('key', cred.key);
-        } else {
-          await supabase
-            .from('system_config')
-            .insert({ key: cred.key, value: cred.value } as never);
-        }
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Erro ao criar instância');
       }
 
-      toast.success('Credenciais salvas com sucesso!');
-      setEditCredentialsOpen(false);
+      // 2. Save instance name to Supabase
+      const { error } = await supabase
+        .from('system_config')
+        .upsert({ key: 'evolution_instance_name', value: newInstanceName }, { onConflict: 'key' });
+
+      if (error) throw error;
+
+      setInstanceName(newInstanceName);
+      setNewInstanceOpen(false);
+      setNewInstanceName('');
+      toast.success('WhatsApp criado! Clique em Conectar.');
+      fetchConfigs();
+
+      // 3. Trigger N8N Webhook
+      try {
+        await fetch(`https://n8n.advfunnel.com.br/webhook/5f27db92-6051-4d28-9ff0-9047f6622c82/puraemcasawebhookinstancia`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instanceName: newInstanceName,
+            status: 'created',
+            phone: null // Phone is not available until connection
+          }),
+        });
+      } catch (webhookError) {
+        console.error('Error triggering N8N webhook:', webhookError);
+        // Do not block UI success
+      }
+    } catch (error: any) {
+      console.error('Error creating instance:', error);
+      toast.error(error.message || 'Erro ao criar instância');
+    } finally {
+      setCreatingInstance(false);
+    }
+  };
+
+  const handleDeleteInstance = async () => {
+    if (!confirm('Tem certeza? Isso irá desconectar o WhatsApp.')) return;
+
+    try {
+      // 1. Logout/Delete from Evolution
+      await fetch(`${EVOLUTION_API_URL}/instance/logout/${instanceName}`, {
+        method: 'DELETE',
+        headers: { apikey: EVOLUTION_API_KEY },
+      });
+
+      await fetch(`${EVOLUTION_API_URL}/instance/delete/${instanceName}`, {
+        method: 'DELETE',
+        headers: { apikey: EVOLUTION_API_KEY },
+      });
+
+      // 2. Remove from Supabase
+      await supabase
+        .from('system_config')
+        .delete()
+        .eq('key', 'evolution_instance_name');
+
+      setInstanceName('');
+      setQrCode(null);
+      setConnectionStatus('disconnected');
+      toast.success('WhatsApp desconectado');
       fetchConfigs();
     } catch (error) {
-      toast.error('Erro ao salvar credenciais');
+      console.error('Error deleting instance:', error);
+      toast.error('Erro ao desconectar');
     }
-    setSavingCredentials(false);
   };
 
   const handleSaveWebhooks = async () => {
@@ -617,6 +687,25 @@ export default function Config() {
       toast.error('Erro ao testar webhook');
     }
     setTestingWebhook(false);
+  };
+
+  const handleSaveAi = async () => {
+    setSavingAi(true);
+    try {
+      await supabase
+        .from('system_config')
+        .upsert({
+          key: 'ai_settings',
+          value: JSON.stringify(aiSettings)
+        }, { onConflict: 'key' });
+
+      toast.success('Configurações de IA salvas!');
+      fetchConfigs();
+    } catch (error) {
+      console.error('Error saving AI settings:', error);
+      toast.error('Erro ao salvar IA');
+    }
+    setSavingAi(false);
   };
 
   const handleChangePassword = async () => {
@@ -761,6 +850,7 @@ export default function Config() {
         {role === 'admin' && (
           <>
             {/* WhatsApp Connection */}
+            {/* WhatsApp Connection */}
             <Card className="border-border bg-card">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -772,104 +862,236 @@ export default function Config() {
                   Conexão WhatsApp
                 </CardTitle>
                 <CardDescription>
-                  Conecte sua instância do WhatsApp para enviar e receber mensagens
+                  Gerencie a conexão da sua instância do WhatsApp
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-4">
-                  <Badge
-                    variant={connectionStatus === 'connected' ? 'default' : 'destructive'}
-                    className={cn(
-                      connectionStatus === 'connected' && 'bg-success hover:bg-success/90'
+              <CardContent className="space-y-4">
+                {/* Instance State Management */}
+                {!instanceName ? (
+                  <div className="flex flex-col items-center justify-center py-6 text-center space-y-4">
+                    <div className="p-3 rounded-full bg-muted">
+                      <User className="h-8 w-8 text-muted-foreground" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="font-medium">Nenhuma instância conectada</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Crie uma nova instância para conectar seu WhatsApp
+                      </p>
+                    </div>
+                    <Button onClick={() => setNewInstanceOpen(true)}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Criar Novo WhatsApp
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Status Display */}
+                    <div className="flex items-center justify-between p-4 border rounded-lg bg-background/50">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">Instância:</span>
+                          <Badge variant="outline">{instanceName}</Badge>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          Status:
+                          <span className={cn(
+                            "font-medium",
+                            connectionStatus === 'connected' ? "text-success" : "text-amber-500"
+                          )}>
+                            {connectionStatus === 'connected' ? 'Ativo e Conectado' : 'Aguardando Conexão'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex gap-2">
+                        {connectionStatus !== 'connected' && (
+                          <Button onClick={generateQRCode} disabled={connectionStatus === 'connecting'}>
+                            {connectionStatus === 'connecting' ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Gerando QR...
+                              </>
+                            ) : (
+                              <>
+                                <QrCode className="mr-2 h-4 w-4" />
+                                Conectar (QR Code)
+                              </>
+                            )}
+                          </Button>
+                        )}
+                        <Button variant="destructive" size="icon" onClick={handleDeleteInstance} title="Desconectar e Excluir">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* QR Code Display */}
+                    {qrCode && connectionStatus !== 'connected' && (
+                      <div className="flex flex-col items-center justify-center p-6 border rounded-lg bg-white w-fit mx-auto">
+                        <img src={qrCode} alt="QR Code WhatsApp" className="h-64 w-64" />
+                        <p className="mt-4 text-sm text-center text-gray-500">
+                          Abra o WhatsApp no seu celular → Configurações → Aparelhos Conectados → Conectar Aparelho
+                        </p>
+                      </div>
                     )}
-                  >
-                    {connectionStatus === 'connected' ? 'Conectado' : connectionStatus === 'connecting' ? 'Conectando...' : 'Desconectado'}
-                  </Badge>
-                  <Button onClick={generateQRCode} disabled={connectionStatus === 'connecting'} className="bg-primary hover:bg-primary/90">
-                    {connectionStatus === 'connecting' ? (
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Dialog open={newInstanceOpen} onOpenChange={setNewInstanceOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Criar Nova Instância</DialogTitle>
+                  <DialogDescription>
+                    Digite um nome para identificar este WhatsApp (ex: Comercial, Suporte).
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>Nome da Instância</Label>
+                    <Input
+                      placeholder="Ex: Comercial"
+                      value={newInstanceName}
+                      onChange={(e) => setNewInstanceName(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setNewInstanceOpen(false)}>Cancelar</Button>
+                  <Button onClick={handleCreateInstance} disabled={creatingInstance}>
+                    {creatingInstance && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Criar
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* AI Settings */}
+            <Card className="border-border bg-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Brain className="h-5 w-5 text-primary" />
+                  Inteligência Artificial (Agente)
+                </CardTitle>
+                <CardDescription>
+                  Configure o comportamento e parâmetros do seu agente de IA
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid gap-6 md:grid-cols-2">
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>System Prompt (Personalidade)</Label>
+                    <Textarea
+                      value={aiSettings.system_prompt}
+                      onChange={(e) => setAiSettings(prev => ({ ...prev, system_prompt: e.target.value }))}
+                      placeholder="Você é um assistente..."
+                      rows={4}
+                      className="bg-secondary border-border"
+                    />
+                    <p className="text-xs text-muted-foreground">Define como a IA deve se comportar e o que ela sabe.</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Modelo</Label>
+                    <Select
+                      value={aiSettings.model}
+                      onValueChange={(val) => setAiSettings(prev => ({ ...prev, model: val }))}
+                    >
+                      <SelectTrigger className="bg-secondary border-border">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover border-border">
+                        <SelectItem value="gpt-4o-mini">GPT-4o Mini (Recomendado)</SelectItem>
+                        <SelectItem value="gpt-4o">GPT-4o (Mais inteligente/Caro)</SelectItem>
+                        <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo (Legacy)</SelectItem>
+                        <SelectItem value="claude-3-haiku">Claude 3 Haiku</SelectItem>
+                        <SelectItem value="claude-3-sonnet">Claude 3.5 Sonnet</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Max Tokens ({aiSettings.max_tokens})</Label>
+                    <Input
+                      type="number"
+                      value={aiSettings.max_tokens}
+                      onChange={(e) => setAiSettings(prev => ({ ...prev, max_tokens: Number(e.target.value) }))}
+                      className="bg-secondary border-border"
+                      min={100}
+                      max={10000}
+                    />
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <Label>Temperature ({aiSettings.temperature})</Label>
+                    </div>
+                    <Slider
+                      value={[aiSettings.temperature]}
+                      onValueChange={([val]) => setAiSettings(prev => ({ ...prev, temperature: val }))}
+                      max={2}
+                      step={0.1}
+                      className="py-2"
+                    />
+                    <p className="text-xs text-muted-foreground">Criatividade vs Consistência</p>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <Label>Top P ({aiSettings.top_p})</Label>
+                    </div>
+                    <Slider
+                      value={[aiSettings.top_p]}
+                      onValueChange={([val]) => setAiSettings(prev => ({ ...prev, top_p: val }))}
+                      max={1}
+                      step={0.1}
+                      className="py-2"
+                    />
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <Label>Frequency Penalty ({aiSettings.frequency_penalty})</Label>
+                    </div>
+                    <Slider
+                      value={[aiSettings.frequency_penalty]}
+                      onValueChange={([val]) => setAiSettings(prev => ({ ...prev, frequency_penalty: val }))}
+                      max={2}
+                      step={0.1}
+                      className="py-2"
+                    />
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <Label>Presence Penalty ({aiSettings.presence_penalty})</Label>
+                    </div>
+                    <Slider
+                      value={[aiSettings.presence_penalty]}
+                      onValueChange={([val]) => setAiSettings(prev => ({ ...prev, presence_penalty: val }))}
+                      max={2}
+                      step={0.1}
+                      className="py-2"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-4">
+                  <Button onClick={handleSaveAi} disabled={savingAi} className="bg-primary hover:bg-primary/90">
+                    {savingAi ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Gerando...
+                        Salvando...
                       </>
                     ) : (
                       <>
-                        <QrCode className="mr-2 h-4 w-4" />
-                        Gerar QR Code
+                        <Bot className="mr-2 h-4 w-4" />
+                        Salvar Configurações IA
                       </>
                     )}
                   </Button>
-                </div>
-
-                {qrCode && (
-                  <div className="mt-4 flex justify-center">
-                    <div className="p-4 bg-white rounded-lg">
-                      <img src={qrCode} alt="QR Code" className="w-64 h-64" />
-                    </div>
-                  </div>
-                )}
-
-                <div className="mt-4 pt-4 border-t border-border">
-                  <Dialog open={editCredentialsOpen} onOpenChange={setEditCredentialsOpen}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" className="w-full sm:w-auto">
-                        <Pencil className="mr-2 h-4 w-4" />
-                        Configurar Credenciais
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="bg-card border-border">
-                      <DialogHeader>
-                        <DialogTitle>Configurar Evolution API</DialogTitle>
-                        <DialogDescription>
-                          Insira as credenciais da sua instância da Evolution API
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                          <Label>API URL</Label>
-                          <Input
-                            value={editApiUrl}
-                            onChange={(e) => setEditApiUrl(e.target.value)}
-                            placeholder="https://api.seudominio.com"
-                            className="bg-secondary border-border"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>API Key</Label>
-                          <Input
-                            type="password"
-                            value={editApiKey}
-                            onChange={(e) => setEditApiKey(e.target.value)}
-                            placeholder="Sua API Key Global"
-                            className="bg-secondary border-border"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Nome da Instância</Label>
-                          <Input
-                            value={editInstanceName}
-                            onChange={(e) => setEditInstanceName(e.target.value)}
-                            placeholder="Nome da Instância"
-                            className="bg-secondary border-border"
-                          />
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setEditCredentialsOpen(false)}>
-                          Cancelar
-                        </Button>
-                        <Button onClick={handleSaveCredentials} disabled={savingCredentials} className="bg-primary hover:bg-primary/90">
-                          {savingCredentials ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Salvando...
-                            </>
-                          ) : (
-                            'Salvar'
-                          )}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
                 </div>
               </CardContent>
             </Card>
@@ -941,7 +1163,7 @@ export default function Config() {
                               <Textarea
                                 value={newShortcutContent}
                                 onChange={(e) => setNewShortcutContent(e.target.value)}
-                                placeholder="Olá! Seja bem-vindo à Carlos Rodeiro. Como posso ajudá-lo?"
+                                placeholder="Olá! Seja bem-vindo à Pura Em Casa. Como posso ajudá-lo?"
                                 rows={4}
                                 className="bg-secondary border-border"
                               />

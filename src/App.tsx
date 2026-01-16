@@ -21,53 +21,54 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 const App = () => {
+  console.log('Rendering App Component');
   useViewportHeight();
-  
-  return (
-  <QueryClientProvider client={queryClient}>
-    <AuthProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner position="top-right" />
-        <BrowserRouter>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
 
-            {/* Protected routes with layout */}
-            <Route
-              element={
-                <ProtectedRoute>
-                  <AppLayout />
-                </ProtectedRoute>
-              }
-            >
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner position="top-right" />
+          <BrowserRouter>
+            <Routes>
+              {/* Public routes */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
+
+              {/* Protected routes with layout */}
               <Route
-                path="/dashboard"
                 element={
-                  <ProtectedRoute adminOnly>
-                    <Dashboard />
+                  <ProtectedRoute>
+                    <AppLayout />
                   </ProtectedRoute>
                 }
-              />
-              <Route path="/conversas" element={<Conversas />} />
-              <Route path="/kanban" element={<Kanban />} />
-              <Route path="/config" element={<Config />} />
-            </Route>
+              >
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute adminOnly>
+                      <Dashboard />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route path="/conversas" element={<Conversas />} />
+                <Route path="/kanban" element={<Kanban />} />
+                <Route path="/config" element={<Config />} />
+              </Route>
 
-            {/* Redirects */}
-            <Route path="/" element={<Navigate to="/conversas" replace />} />
-            
-            {/* 404 */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </TooltipProvider>
-    </AuthProvider>
-  </QueryClientProvider>
+              {/* Redirects */}
+              <Route path="/" element={<Navigate to="/conversas" replace />} />
+
+              {/* 404 */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </TooltipProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 };
 

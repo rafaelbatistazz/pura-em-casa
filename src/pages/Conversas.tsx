@@ -3,9 +3,14 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { normalizePhone, maskPhone } from '@/lib/phoneUtils';
 import { cn, getSaoPauloTimestamp } from '@/lib/utils';
+
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { Calendar } from '@/components/ui/calendar';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Label } from '@/components/ui/label';
@@ -28,45 +33,41 @@ import {
 import { toast } from 'sonner';
 import {
   Search, Send, ArrowLeft, Plus, Loader2, UserCog, FileText,
-  ChevronDown, CheckCheck, Paperclip, Mic, Square, X, Image as ImageIcon, Play, Pause, MessageSquare, Trash2
+  ChevronDown, CheckCheck, Paperclip, Mic, Square, X, Image as ImageIcon, Play, Pause, MessageSquare, Trash2, Bot, Calendar as CalendarIcon
 } from 'lucide-react';
 import { useDebounce } from '@/hooks/useDebounce';
 import { MessageShortcuts } from '@/components/MessageShortcuts';
 import type { Lead, Message, LeadStatus, SystemConfig, User, MediaType } from '@/types/database';
+import { ClientDetailsSheet } from '@/components/ClientDetailsSheet';
+import { MoreVertical } from 'lucide-react';
 
 const TIMEZONE = 'America/Sao_Paulo';
 
 // Função getSaoPauloTimestamp importada de @/lib/utils
 
-const statusColors: Record<string, string> = {
-  'Novos Leads': 'bg-slate-500/20 text-slate-400',
-  'Qualificação': 'bg-yellow-500/20 text-yellow-400',
-  'Apresentação': 'bg-blue-500/20 text-blue-400',
-  'Follow-up': 'bg-orange-500/20 text-orange-400',
-  'Negociação': 'bg-purple-500/20 text-purple-400',
-  'Aguardar Pagamento': 'bg-pink-500/20 text-pink-400',
-  'Produção': 'bg-indigo-500/20 text-indigo-400',
-  'Pronto para Entrega': 'bg-teal-500/20 text-teal-400',
-  'Vendido': 'bg-emerald-500/20 text-emerald-400',
-  'Pós-Venda': 'bg-cyan-500/20 text-cyan-400',
-  'Perdido': 'bg-red-500/20 text-red-500',
+
+const EVOLUTION_API_URL = 'https://evo.advfunnel.com.br';
+const EVOLUTION_API_KEY = 'ESWH6B36nhfW3apMfQQAv3SU2CthsZCg';
+
+export const statusColors: Record<string, string> = {
+  'Oportunidade': 'bg-slate-500/20 text-slate-400',
+  'Atendendo': 'bg-yellow-500/20 text-yellow-400',
+  'Proposta': 'bg-blue-500/20 text-blue-400',
+  'Follow Up': 'bg-orange-500/20 text-orange-400',
+  'Agendado': 'bg-teal-500/20 text-teal-400',
+  'Pós Venda': 'bg-purple-500/20 text-purple-400',
 };
 
-const statusLabels: Record<string, string> = {
-  'Novos Leads': 'Novos Leads',
-  'Qualificação': 'Qualificação',
-  'Apresentação': 'Apresentação',
-  'Follow-up': 'Follow-up',
-  'Negociação': 'Negociação',
-  'Aguardar Pagamento': 'Aguardar Pagamento',
-  'Produção': 'Produção',
-  'Pronto para Entrega': 'Pronto',
-  'Vendido': 'Vendido',
-  'Pós-Venda': 'Pós-Venda',
-  'Perdido': 'Perdido',
+export const statusLabels: Record<string, string> = {
+  'Oportunidade': 'Oportunidade',
+  'Atendendo': 'Atendendo',
+  'Proposta': 'Proposta',
+  'Follow Up': 'Follow Up',
+  'Agendado': 'Agendado',
+  'Pós Venda': 'Pós Venda',
 };
 
-const avatarColors = [
+export const avatarColors = [
   'bg-primary',
   'bg-success',
   'bg-warning',
@@ -76,6 +77,15 @@ const avatarColors = [
   'bg-indigo-500',
   'bg-teal-500',
 ];
+
+export const getInitials = (name: string) => {
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+};
 
 type FilterType = 'all' | 'unread' | LeadStatus;
 
@@ -91,8 +101,9 @@ export default function Conversas() {
 
   // Helper to display phone
   const displayPhone = (phone: string) => {
-    if (role === 'admin') return phone;
-    return maskPhone(phone);
+    const cleanPhone = phone?.split('@')[0] || '';
+    if (role === 'admin') return cleanPhone;
+    return maskPhone(cleanPhone);
   };
 
   const [leads, setLeads] = useState<LeadWithMessages[]>([]);
@@ -129,11 +140,13 @@ export default function Conversas() {
   // Users list for assignment
   const [allUsers, setAllUsers] = useState<User[]>([]);
 
-  // Notes modal
-  const [notesOpen, setNotesOpen] = useState(false);
+  // Sheet state
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [editingNotes, setEditingNotes] = useState('');
-  const [savingNotes, setSavingNotes] = useState(false);
+  const [editingNotes, setEditingNotes] = useState(''); // Kept for legacy compatibility or removal
+  const [savingNotes, setSavingNotes] = useState(false); // Kept for legacy compatibility or removal
+
+
 
   // Media states
   const [isRecording, setIsRecording] = useState(false);
@@ -143,6 +156,64 @@ export default function Conversas() {
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+
+  // Simplified handlers for Sheet
+  const handleUpdateLead = async (updates: Partial<Lead>) => {
+    if (!selectedLead) return;
+
+    const { error } = await supabase
+      .from('leads')
+      .update({ ...updates, updated_at: getSaoPauloTimestamp() } as never)
+      .eq('id', selectedLead.id);
+
+    if (error) {
+      toast.error('Erro ao atualizar lead');
+    } else {
+      toast.success('Lead atualizado');
+      // fetchLeads(); // Optimized: update local state instead if possible, but fetch is safer
+      fetchLeads();
+    }
+  };
+
+  // Clear History Wrapper
+  const handleClearHistoryWrapper = async () => {
+    if (!selectedLead) return;
+    if (!confirm('Limpar histórico de mensagens? (Essa ação é irreversível)')) return;
+
+    const { error } = await supabase
+      .from('messages')
+      .delete()
+      .eq('lead_id', selectedLead.id);
+
+    if (error) {
+      toast.error('Erro ao limpar histórico');
+    } else {
+      toast.success('Histórico limpo');
+      setMessages([]);
+      fetchLeads();
+      setDetailsOpen(false);
+    }
+  };
+
+  // Delete Lead Wrapper
+  const handleDeleteLeadWrapper = async () => {
+    if (!selectedLead) return;
+    if (!confirm('Tem certeza que deseja excluir este lead e todas as mensagens?')) return;
+
+    const { error } = await supabase
+      .from('leads')
+      .delete()
+      .eq('id', selectedLead.id);
+
+    if (error) {
+      toast.error('Erro ao excluir lead');
+    } else {
+      toast.success('Lead excluído');
+      setSelectedLead(null);
+      setDetailsOpen(false);
+      fetchLeads();
+    }
+  };
 
   // Audio player states
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
@@ -197,7 +268,13 @@ export default function Conversas() {
         })
       );
 
-      setLeads(leadsWithMessages);
+      const sortedLeads = leadsWithMessages.sort((a, b) => {
+        const timeA = a.last_message_time ? new Date(a.last_message_time).getTime() : 0;
+        const timeB = b.last_message_time ? new Date(b.last_message_time).getTime() : 0;
+        return timeB - timeA;
+      });
+
+      setLeads(sortedLeads);
     }
     setLoadingLeads(false);
   };
@@ -469,6 +546,27 @@ export default function Conversas() {
     }
   };
 
+  // Handle Date Selection
+  const handleDateSelect = async (date: Date | undefined) => {
+    if (!selectedLead) return;
+
+    // Optimistic update
+    const updatedLead = { ...selectedLead, cleaning_date: date?.toISOString() || null };
+    setSelectedLead(updatedLead);
+    setLeads(leads.map(l => l.id === selectedLead.id ? updatedLead : l));
+
+    const { error } = await supabase
+      .from('leads')
+      .update({ cleaning_date: date?.toISOString() || null })
+      .eq('id', selectedLead.id);
+
+    if (error) {
+      toast.error('Erro ao atualizar data');
+    } else {
+      toast.success('Data atualizada!');
+    }
+  };
+
   const sendMessage = async (text?: string, mediaUrl?: string, mediaType?: MediaType) => {
     const messageText = text?.trim() || inputText.trim();
     if (!messageText && !mediaUrl) return;
@@ -501,30 +599,29 @@ export default function Conversas() {
 
     setSendingMessage(true);
     try {
-      const { data: configs } = await supabase
+      // Fetch ONLY instance name from database
+      const { data: config } = await supabase
         .from('system_config')
-        .select('key, value')
-        .in('key', ['evolution_api_url', 'evolution_api_key', 'evolution_instance_name']);
+        .select('value')
+        .eq('key', 'evolution_instance_name')
+        .maybeSingle(); // Use maybeSingle to avoid 406 error if not found/multiple
 
-      const configArray = configs as SystemConfig[] | null;
-      const apiUrl = configArray?.find((c) => c.key === 'evolution_api_url')?.value;
-      const apiKey = configArray?.find((c) => c.key === 'evolution_api_key')?.value;
-      const instance = configArray?.find((c) => c.key === 'evolution_instance_name')?.value;
+      const instance = config?.value;
 
       // 1. Sempre tenta enviar via API se configurado
-      if (apiUrl && apiKey && instance) {
+      if (instance) {
         try {
           if (mediaUrl && mediaType) {
             if (mediaType === 'audio') {
-              await fetch(`${apiUrl}/message/sendWhatsAppAudio/${instance}`, {
+              await fetch(`${EVOLUTION_API_URL}/message/sendWhatsAppAudio/${instance}`, {
                 method: 'POST',
-                headers: { apikey: apiKey, 'Content-Type': 'application/json' },
+                headers: { apikey: EVOLUTION_API_KEY, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ number: selectedLead.phone, audio: mediaUrl }),
               });
             } else {
-              await fetch(`${apiUrl}/message/sendMedia/${instance}`, {
+              await fetch(`${EVOLUTION_API_URL}/message/sendMedia/${instance}`, {
                 method: 'POST',
-                headers: { apikey: apiKey, 'Content-Type': 'application/json' },
+                headers: { apikey: EVOLUTION_API_KEY, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   number: selectedLead.phone,
                   mediatype: mediaType,
@@ -534,15 +631,18 @@ export default function Conversas() {
               });
             }
           } else {
-            await fetch(`${apiUrl}/message/sendText/${instance}`, {
+            await fetch(`${EVOLUTION_API_URL}/message/sendText/${instance}`, {
               method: 'POST',
-              headers: { apikey: apiKey, 'Content-Type': 'application/json' },
+              headers: { apikey: EVOLUTION_API_KEY, 'Content-Type': 'application/json' },
               body: JSON.stringify({ number: selectedLead.phone, text: messageText }),
             });
           }
         } catch (apiError) {
           console.error('Erro ao enviar via API:', apiError);
         }
+      } else {
+        console.error('Instância não configurada. Mensagem salva apenas no banco.');
+        toast.warning('WhatsApp desconectado. Mensagem salva apenas no sistema.');
       }
 
       // 2. SEMPRE insere no banco para garantir histórico (Confiabilidade > Duplicidade temporária)
@@ -871,6 +971,35 @@ export default function Conversas() {
     setSavingNotes(false);
   };
 
+  const handleToggleChange = async (type: 'ai' | 'followup', checked: boolean) => {
+    if (!selectedLead) return;
+
+    try {
+      const updateData = type === 'ai' ? { ai_enabled: checked } : { followup_enabled: checked };
+
+      const { error } = await supabase
+        .from('leads')
+        .update({ ...updateData, updated_at: getSaoPauloTimestamp() } as never)
+        .eq('id', selectedLead.id);
+
+      if (error) throw error;
+
+      // Optimistic update
+      const updatedLead = {
+        ...selectedLead,
+        [type === 'ai' ? 'ai_enabled' : 'followup_enabled']: checked
+      };
+
+      setSelectedLead(updatedLead);
+      setLeads(prev => prev.map(l => l.id === selectedLead.id ? { ...l, ...updateData } : l));
+
+      toast.success(`${type === 'ai' ? 'IA' : 'Follow-up'} ${checked ? 'ativado' : 'desativado'}`);
+    } catch (error) {
+      console.error('Error toggling settings:', error);
+      toast.error('Erro ao atualizar configuração');
+    }
+  };
+
   const normalizeTimestamp = (timestamp: string | null | undefined) => {
     if (!timestamp) return new Date().toISOString();
 
@@ -960,15 +1089,7 @@ export default function Conversas() {
     return avatarColors[index];
   };
 
-  const getInitials = (name: string | null) => {
-    if (!name) return '?';
-    return name
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
-  };
+
 
   const truncateMessage = (text: string, maxLength: number = 40) => {
     if (!text) return '';
@@ -1286,7 +1407,6 @@ export default function Conversas() {
         </div>
       </div>
 
-      {/* Chat Area - Side by side on desktop, fullscreen on mobile */}
       <div
         className={cn(
           'flex-1 min-w-0 h-full grid grid-rows-[auto_1fr_auto]',
@@ -1309,154 +1429,119 @@ export default function Conversas() {
                 >
                   <ArrowLeft className="h-5 w-5 text-primary-foreground" />
                 </Button>
-                <Avatar className={cn('h-10 w-10 shrink-0', getAvatarColor(selectedLead.name))}>
-                  <AvatarFallback className="text-primary-foreground font-medium text-sm">
-                    {getInitials(selectedLead.name)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium truncate text-sm text-foreground leading-tight">{selectedLead.name || displayPhone(selectedLead.phone)}</p>
-                  <p className="text-xs text-muted-foreground truncate">{selectedLead.name ? displayPhone(selectedLead.phone) : ''}</p>
+                <div
+                  className="flex items-center gap-2 md:gap-3 min-w-0 flex-1 cursor-pointer hover:opacity-80 transition-opacity"
+                  onClick={() => {
+                    console.log('Opening details from Avatar');
+                    setDetailsOpen(true);
+                  }}
+                >
+                  <Avatar className={cn('h-10 w-10 shrink-0', getAvatarColor(selectedLead.name))}>
+                    <AvatarFallback className="text-primary-foreground font-medium text-sm">
+                      {getInitials(selectedLead.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate text-sm text-foreground leading-tight">{selectedLead.name || displayPhone(selectedLead.phone)}</p>
+                    <p className="text-xs text-muted-foreground truncate">{selectedLead.name ? displayPhone(selectedLead.phone) : ''}</p>
+                  </div>
                 </div>
               </div>
 
               {/* Actions */}
               <div className="flex items-center gap-2 shrink-0">
-                {/* Status Selector */}
+                {/* Automations Settings */}
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-9 px-2 gap-1 touch-manipulation text-foreground hover:bg-secondary">
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-foreground hover:bg-secondary">
+                      <Bot className={cn("h-5 w-5", selectedLead.ai_enabled ? "text-primary" : "text-muted-foreground")} />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-3 bg-popover border-border z-[200]" align="end">
+                    <div className="space-y-3">
+                      <h4 className="font-medium leading-none mb-2 text-sm text-foreground">Automações</h4>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="ai-toggle" className="text-sm cursor-pointer">IA Ativa</Label>
+                        <Switch
+                          id="ai-toggle"
+                          checked={selectedLead.ai_enabled}
+                          onCheckedChange={(checked) => handleToggleChange('ai', checked)}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="followup-toggle" className="text-sm cursor-pointer">Follow-up</Label>
+                        <Switch
+                          id="followup-toggle"
+                          checked={selectedLead.followup_enabled}
+                          onCheckedChange={(checked) => handleToggleChange('followup', checked)}
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground pt-1 border-t border-border mt-2">
+                        Controle o comportamento automático para este lead.
+                      </p>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                {/* Status Badge */}
+                {/* Status Badge Popover */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-9 px-2 gap-1 touch-manipulation text-foreground hover:bg-secondary"
+                    >
                       <Badge className={cn('text-[10px] px-1.5', statusColors[selectedLead.status] || 'bg-secondary text-foreground')}>
-                        <span className="hidden sm:inline">{statusLabels[selectedLead.status] || selectedLead.status}</span>
-                        <span className="sm:hidden">{(statusLabels[selectedLead.status] || selectedLead.status || '').slice(0, 3)}</span>
+                        {statusLabels[selectedLead.status] || selectedLead.status}
                       </Badge>
-                      <ChevronDown className="h-3 w-3" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-48 p-2 bg-popover border-border z-[200]" align="end">
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground px-2 py-1">Status</p>
+                    <div className="grid gap-1">
+                      <span className="font-medium text-xs mb-1 px-2">Alterar Status</span>
                       {Object.entries(statusLabels).map(([key, label]) => (
-                        <button
+                        <Button
                           key={key}
-                          onClick={() => handleStatusChange(key as LeadStatus)}
+                          variant="ghost"
+                          size="sm"
                           className={cn(
-                            'w-full text-left px-2 py-2.5 rounded-md text-sm hover:bg-secondary transition-colors flex items-center gap-2 touch-manipulation',
-                            selectedLead.status === key && 'bg-secondary'
+                            "justify-start text-xs h-8 px-2 font-normal",
+                            selectedLead.status === key && "bg-secondary font-medium"
                           )}
+                          onClick={() => {
+                            handleUpdateLead({ status: key });
+                            // Popover closes automatically on interaction/click-away usually, or we can use a state if needed.
+                            // But radix popover usually stays open unless closed. Ideally usage of `DialogClose` or controlling state.
+                            // For simplicity, we can let it be or use a wrapper.
+                            // Let's try adding a small delay or just rely on the user clicking away?
+                            // Actually, standard behavior is fine, or we can use the `open` prop if we want to force close.
+                            // But let's stick to simple first.
+                            document.body.click(); // Hacky way to close popovers? No.
+                            // Let's simply call update.
+                          }}
                         >
-                          <div className={cn('w-2 h-2 rounded-full', statusColors[key as LeadStatus].split(' ')[0])} />
+                          <div className={cn('w-2 h-2 rounded-full mr-2', statusColors[key]?.split(' ')[0] || 'bg-slate-500')} />
                           {label}
-                        </button>
+                        </Button>
                       ))}
                     </div>
                   </PopoverContent>
                 </Popover>
 
-                {/* Admin: Assigned To */}
-                {role === 'admin' && (
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-9 px-2 gap-1 touch-manipulation text-foreground hover:bg-secondary">
-                        <UserCog className="h-4 w-4" />
-                        <span className="hidden lg:inline max-w-[80px] truncate text-xs">
-                          {getAssignedUserName(selectedLead.assigned_to)}
-                        </span>
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-56 p-2 bg-popover border-border z-[200]" align="end">
-                      <div className="space-y-1">
-                        <p className="text-xs font-medium text-muted-foreground px-2 py-1">Responsável</p>
-                        <button
-                          onClick={() => handleAssignedChange('none')}
-                          className={cn(
-                            'w-full text-left px-2 py-2.5 rounded-md text-sm hover:bg-secondary transition-colors touch-manipulation',
-                            !selectedLead.assigned_to && 'bg-secondary'
-                          )}
-                        >
-                          Não atribuído
-                        </button>
-                        {allUsers.map(u => (
-                          <button
-                            key={u.id}
-                            onClick={() => handleAssignedChange(u.id)}
-                            className={cn(
-                              'w-full text-left px-2 py-2.5 rounded-md text-sm hover:bg-secondary transition-colors flex items-center gap-2 touch-manipulation',
-                              selectedLead.assigned_to === u.id && 'bg-secondary'
-                            )}
-                          >
-                            <Avatar className="h-5 w-5">
-                              <AvatarFallback className="text-[10px] bg-primary text-primary-foreground">{getInitials(u.name)}</AvatarFallback>
-                            </Avatar>
-                            <span className="truncate">{u.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                )}
-
-                {/* Admin: Delete Conversation */}
-                {/* Admin: Delete Conversation */}
-                {role === 'admin' && (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                      onClick={() => setDeleteConfirmOpen(true)}
-                      title="Excluir conversa"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-
-                    <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Excluir conversa</DialogTitle>
-                          <DialogDescription>
-                            Tem certeza que deseja excluir esta conversa e todas as mensagens?
-                            Esta ação não pode ser desfeita.
-                          </DialogDescription>
-                        </DialogHeader>
-                        <DialogFooter>
-                          <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
-                            Cancelar
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            onClick={() => {
-                              setDeleteConfirmOpen(false);
-                              handleDeleteConversation();
-                            }}
-                          >
-                            Excluir
-                          </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-                  </>
-                )}
-
-                {/* Notes Button - Independent */}
+                {/* More Options / Details Sheet Trigger */}
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="relative h-9 w-9 touch-manipulation text-foreground hover:bg-secondary"
-                  onClick={(e) => {
-                    e.stopPropagation(); // Force click
-                    console.log('Mobile notes button clicked');
-                    setEditingNotes(selectedLead.notes || '');
-                    setNotesOpen(true);
-                  }}
+                  className="h-9 w-9"
+                  onClick={() => setDetailsOpen(true)}
                 >
-                  <FileText className="h-4 w-4" />
-                  {selectedLead.notes && (
-                    <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-primary rounded-full" />
-                  )}
+                  <MoreVertical className="h-5 w-5" />
                 </Button>
               </div>
+
             </div>
+
 
             {/* Messages */}
             <div className="min-h-0 w-full max-w-full overflow-y-auto px-3 py-3 space-y-2 scrollbar-thin overscroll-contain chat-pattern">
@@ -1646,36 +1731,20 @@ export default function Conversas() {
           </div>
         )}
       </div>
-      {/* Notes Dialog - Global at page level */}
-      {selectedLead && (
-        <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
-          <DialogContent className="mx-4 max-w-[calc(100vw-2rem)] sm:max-w-lg bg-card border-border">
-            <DialogHeader>
-              <DialogTitle>Observações</DialogTitle>
-              <DialogDescription>Adicione notas sobre este cliente</DialogDescription>
-            </DialogHeader>
-            <div className="py-4">
-              <Textarea
-                value={editingNotes}
-                onChange={(e) => setEditingNotes(e.target.value)}
-                placeholder="Digite observações sobre o cliente..."
-                rows={5}
-                className="min-h-[120px] bg-secondary border-border"
-              />
-            </div>
-            <DialogFooter className="flex-col sm:flex-row gap-2">
-              <Button variant="outline" onClick={() => setNotesOpen(false)} className="h-11 w-full sm:w-auto">Cancelar</Button>
-              <Button onClick={handleSaveNotes} disabled={savingNotes} className="h-11 w-full sm:w-auto bg-primary hover:bg-primary/90">
-                {savingNotes ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Salvar
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+      {/* Client Details Sheet (Replaces old modals) */}
+      <ClientDetailsSheet
+        lead={selectedLead}
+        isOpen={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        onUpdateLead={handleUpdateLead}
+        onDeleteLead={handleDeleteLeadWrapper}
+        onClearHistory={handleClearHistoryWrapper}
+        allUsers={allUsers}
+        role={role === 'admin' ? 'admin' : 'user'}
+      />
 
       {/* New Lead/Conversation Dialogs would be here too... */}
-    </div>
+    </div >
   );
 }
 

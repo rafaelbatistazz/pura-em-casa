@@ -20,8 +20,16 @@ export interface Lead {
   kanban_position: number;
   created_at: string;
   updated_at: string;
+  ai_enabled?: boolean;
+  followup_enabled?: boolean;
   notes?: string | null;
   source?: string | null;
+  cleaning_date?: string | null;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  utm_term?: string | null;
+  utm_content?: string | null;
   users?: User;
 }
 
@@ -113,6 +121,12 @@ export interface Database {
           kanban_position?: number;
           notes?: string | null;
           source?: string | null;
+          cleaning_date?: string | null;
+          utm_source?: string | null;
+          utm_medium?: string | null;
+          utm_campaign?: string | null;
+          utm_term?: string | null;
+          utm_content?: string | null;
         };
         Update: {
           phone?: string;
@@ -123,6 +137,12 @@ export interface Database {
           updated_at?: string;
           notes?: string | null;
           source?: string | null;
+          cleaning_date?: string | null;
+          utm_source?: string | null;
+          utm_medium?: string | null;
+          utm_campaign?: string | null;
+          utm_term?: string | null;
+          utm_content?: string | null;
         };
       };
       messages: {

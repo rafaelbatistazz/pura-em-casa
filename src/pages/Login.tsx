@@ -72,15 +72,13 @@ export default function Login() {
       <div className="w-full max-w-md animate-fade-in">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="h-20 w-20 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 shadow-lg shadow-primary/5">
+          <div className="h-24 w-auto rounded-2xl flex items-center justify-center mb-4">
             <img
-              src="https://lhbwfbquxkutcyqazpnw.supabase.co/storage/v1/object/public/images/logo/cr logo png.webp"
-              alt="CR Logo"
-              className="h-14 w-14 object-contain"
+              src="https://lhbwfbquxkutcyqazpnw.supabase.co/storage/v1/object/public/images/outro/logo-horizontal-1-scaled.webp"
+              alt="Pura Em Casa"
+              className="h-16 w-auto object-contain"
             />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Carlos Rodeiro CRM</h1>
-          <p className="text-muted-foreground">Gestão de Atendimentos <span className="text-xs text-green-500">(v8.0-STABLE)</span></p>
         </div>
 
         <Card className="border-border/50 shadow-xl">

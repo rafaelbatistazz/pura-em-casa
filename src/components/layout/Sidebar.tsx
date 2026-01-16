@@ -46,20 +46,17 @@ export function Sidebar() {
       <div className="flex flex-col h-full">
         {/* Logo */}
         <div className="p-4 flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl overflow-hidden bg-primary flex items-center justify-center">
-            <img 
-              src="https://lhbwfbquxkutcyqazpnw.supabase.co/storage/v1/object/public/images/logo/cr logo png.webp" 
-              alt="CR Logo" 
-              className="h-10 w-10 object-contain"
+          <div className="h-10 w-auto rounded-xl overflow-hidden flex items-center justify-center">
+            <img
+              src="https://lhbwfbquxkutcyqazpnw.supabase.co/storage/v1/object/public/images/outro/logo-horizontal-1-scaled.webp"
+              alt="Pura Em Casa"
+              className="h-8 w-auto object-contain"
               onError={(e) => {
                 e.currentTarget.style.display = 'none';
               }}
             />
           </div>
-          <div>
-            <h1 className="font-semibold text-sidebar-foreground text-sm">Carlos Rodeiro CRM</h1>
-            <p className="text-xs text-muted-foreground">Gestão de Atendimentos</p>
-          </div>
+
         </div>
 
         <Separator className="bg-sidebar-border" />

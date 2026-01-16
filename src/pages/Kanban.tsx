@@ -50,7 +50,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Lead, LeadStatus, User } from '@/types/database';
-import { Phone, Clock, Plus, Loader2, Trash2, Edit2, Save } from 'lucide-react';
+import { Phone, Clock, Plus, Loader2, Trash2 } from 'lucide-react';
 import type { User as UserType, LeadStatus as LeadStatusType } from '@/types/database';
 
 interface KanbanColumn {
@@ -60,17 +60,12 @@ interface KanbanColumn {
 }
 
 const defaultColumns: KanbanColumn[] = [
-  { id: 'Novos Leads', title: 'Novos Leads', color: 'bg-slate-500/20 text-slate-400' },
-  { id: 'Qualificação', title: 'Qualificação', color: 'bg-yellow-500/20 text-yellow-400' },
-  { id: 'Apresentação', title: 'Apresentação / Showroom', color: 'bg-blue-500/20 text-blue-400' },
-  { id: 'Follow-up', title: 'Follow-up', color: 'bg-orange-500/20 text-orange-400' },
-  { id: 'Negociação', title: 'Negociação / Orçamento', color: 'bg-purple-500/20 text-purple-400' },
-  { id: 'Aguardar Pagamento', title: 'Aguardar Pagamento', color: 'bg-pink-500/20 text-pink-400' },
-  { id: 'Produção', title: 'Produção / Ajustes', color: 'bg-indigo-500/20 text-indigo-400' },
-  { id: 'Pronto para Entrega', title: 'Pronto para Entrega', color: 'bg-teal-500/20 text-teal-400' },
-  { id: 'Vendido', title: 'Vendido / Entregue', color: 'bg-emerald-500/20 text-emerald-400' },
-  { id: 'Pós-Venda', title: 'Pós-Venda (LTV)', color: 'bg-cyan-500/20 text-cyan-400' },
-  { id: 'Perdido', title: 'Perdido', color: 'bg-red-500/20 text-red-500' },
+  { id: 'Oportunidade', title: 'Oportunidade', color: 'bg-slate-500/20 text-slate-400' },
+  { id: 'Atendendo', title: 'Atendendo', color: 'bg-yellow-500/20 text-yellow-400' },
+  { id: 'Proposta', title: 'Proposta', color: 'bg-blue-500/20 text-blue-400' },
+  { id: 'Follow Up', title: 'Follow Up', color: 'bg-orange-500/20 text-orange-400' },
+  { id: 'Agendado', title: 'Agendado', color: 'bg-teal-500/20 text-teal-400' },
+  { id: 'Pós Venda', title: 'Pós Venda', color: 'bg-purple-500/20 text-purple-400' },
 ];
 const avatarColors = [
   'bg-primary',
@@ -241,9 +236,7 @@ export default function Kanban() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [users, setUsers] = useState<UserType[]>([]);
 
-  // Column editing state
-  const [isEditingColumns, setIsEditingColumns] = useState(false);
-  const [savingColumns, setSavingColumns] = useState(false);
+
 
   // New lead modal state
   const [newLeadOpen, setNewLeadOpen] = useState(false);
@@ -263,6 +256,7 @@ export default function Kanban() {
   const [editLeadStatus, setEditLeadStatus] = useState<LeadStatusType>('novo');
   const [editLeadAssignedTo, setEditLeadAssignedTo] = useState<string>('');
   const [editLeadNotes, setEditLeadNotes] = useState<string>('');
+  const [editLeadCleaningDate, setEditLeadCleaningDate] = useState<string>('');
   const [savingLead, setSavingLead] = useState(false);
   const [deletingLead, setDeletingLead] = useState(false);
 
@@ -333,37 +327,12 @@ export default function Kanban() {
     if (data) setUsers(data as UserType[]);
   }, [role]);
 
-  const fetchColumns = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('kanban_columns')
-        .select('*')
-        .order('position', { ascending: true });
 
-      if (error) {
-        console.warn('Could not fetch columns, using defaults:', error.message);
-        // Fallback or use defaults if table is empty
-        return;
-      }
-
-      if (data && data.length > 0) {
-        const mappedColumns: KanbanColumn[] = data.map(col => ({
-          id: col.status_id,
-          title: col.title,
-          color: col.color || 'bg-gray-500/20 text-gray-400',
-        }));
-        setColumns(mappedColumns);
-      }
-    } catch (error) {
-      console.error('Error fetching columns:', error);
-    }
-  }, []);
 
   useEffect(() => {
-    fetchColumns();
     fetchLeads();
     fetchUsers();
-  }, [fetchLeads, fetchUsers, fetchColumns]);
+  }, [fetchLeads, fetchUsers]);
 
   const handleCreateLead = async () => {
     if (!newLeadName || !newLeadPhone) {
@@ -424,11 +393,12 @@ export default function Kanban() {
   const handleEditLead = (lead: LeadWithUser) => {
     setEditingLead(lead);
     setEditLeadName(lead.name);
-    setEditLeadPhone(lead.phone);
+    setEditLeadPhone(lead.phone.replace('@s.whatsapp.net', ''));
     setEditLeadSource(lead.source || ''); // Populate source
     setEditLeadStatus(lead.status as LeadStatusType);
     setEditLeadAssignedTo(lead.assigned_to || 'none');
     setEditLeadNotes(lead.notes || '');
+    setEditLeadCleaningDate(lead.cleaning_date ? lead.cleaning_date.split('T')[0] : '');
     setEditLeadOpen(true);
   };
 
@@ -454,6 +424,7 @@ export default function Kanban() {
           status: editLeadStatus,
           assigned_to: editLeadAssignedTo && editLeadAssignedTo !== 'none' ? editLeadAssignedTo : null,
           notes: editLeadNotes || null,
+          cleaning_date: editLeadCleaningDate ? new Date(editLeadCleaningDate).toISOString() : null,
           updated_at: getSaoPauloTimestamp(),
         } as never)
         .eq('id', editingLead.id);
@@ -495,38 +466,9 @@ export default function Kanban() {
     setDeletingLead(false);
   };
 
-  const handleSaveColumns = async () => {
-    setSavingColumns(true);
-    try {
-      // Upsert all columns. Note: this assumes we are just updating titles for existing IDs
-      // If we allowed reordering or adding/removing, we'd need more logic.
-      // For now, we update the title for each column based on its status_id.
 
-      const updates = columns.map((col, index) => ({
-        status_id: col.id,
-        title: col.title,
-        color: col.color,
-        position: index,
-      }));
-
-      const { error } = await supabase
-        .from('kanban_columns')
-        .upsert(updates, { onConflict: 'status_id' });
-
-      if (error) throw error;
-
-      toast.success('Colunas salvas com sucesso!');
-      setIsEditingColumns(false);
-    } catch (error) {
-      console.error('Error saving columns:', error);
-      toast.error('Erro ao salvar colunas');
-    } finally {
-      setSavingColumns(false);
-    }
-  };
 
   const handleDragStart = (event: DragStartEvent) => {
-    if (isEditingColumns) return; // Disable drag when editing columns
     setActiveId(event.active.id as string);
   };
 
@@ -609,31 +551,7 @@ export default function Kanban() {
           <p className="text-muted-foreground">Gerencie seus leads visualmente</p>
         </div>
         <div className="flex gap-2">
-          {role === 'admin' && (
-            <Button
-              variant={isEditingColumns ? "default" : "outline"}
-              onClick={() => {
-                if (isEditingColumns) {
-                  handleSaveColumns();
-                } else {
-                  setIsEditingColumns(true);
-                }
-              }}
-              disabled={savingColumns}
-            >
-              {isEditingColumns ? (
-                <>
-                  {savingColumns ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                  Salvar Colunas
-                </>
-              ) : (
-                <>
-                  <Edit2 className="mr-2 h-4 w-4" />
-                  Editar Colunas
-                </>
-              )}
-            </Button>
-          )}
+
           <Dialog open={newLeadOpen} onOpenChange={setNewLeadOpen}>
             <DialogTrigger asChild>
               <Button>
@@ -641,7 +559,7 @@ export default function Kanban() {
                 Novo Lead
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Novo Lead</DialogTitle>
                 <DialogDescription>Adicione um novo lead ao sistema</DialogDescription>
@@ -713,7 +631,7 @@ export default function Kanban() {
 
       {/* Edit Lead Modal */}
       <Dialog open={editLeadOpen} onOpenChange={setEditLeadOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Editar Lead</DialogTitle>
             <DialogDescription>Atualize as informações do lead</DialogDescription>
@@ -742,6 +660,14 @@ export default function Kanban() {
                 value={editLeadSource}
                 onChange={(e) => setEditLeadSource(e.target.value)}
                 placeholder="Ex: Facebook, Instagram, Google"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Data de Limpeza</Label>
+              <Input
+                type="date"
+                value={editLeadCleaningDate}
+                onChange={(e) => setEditLeadCleaningDate(e.target.value)}
               />
             </div>
             <div className="space-y-2">
@@ -836,22 +762,7 @@ export default function Kanban() {
                   )}
                 >
                   <div className="flex items-center justify-between mb-4">
-                    {isEditingColumns ? (
-                      <Input
-                        value={column.title}
-                        onChange={(e) => {
-                          const newTitle = e.target.value;
-                          setColumns((prev) =>
-                            prev.map((c) =>
-                              c.id === column.id ? { ...c, title: newTitle } : c
-                            )
-                          );
-                        }}
-                        className="h-8 font-semibold bg-white/50"
-                      />
-                    ) : (
-                      <h3 className="font-semibold">{column.title}</h3>
-                    )}
+                    <h3 className="font-semibold">{column.title}</h3>
                     <Badge variant="secondary" className="text-xs">
                       {columnLeads.length}
                     </Badge>

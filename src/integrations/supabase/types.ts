@@ -132,7 +132,14 @@ export type Database = {
           notes: string | null
           phone: string
           status: string | null
+          cleaning_date: string | null
           updated_at: string | null
+          source: string | null
+          utm_source: string | null
+          utm_medium: string | null
+          utm_campaign: string | null
+          utm_term: string | null
+          utm_content: string | null
         }
         Insert: {
           assigned_to?: string | null
@@ -143,7 +150,14 @@ export type Database = {
           notes?: string | null
           phone: string
           status?: string | null
+          cleaning_date?: string | null
           updated_at?: string | null
+          source?: string | null
+          utm_source?: string | null
+          utm_medium?: string | null
+          utm_campaign?: string | null
+          utm_term?: string | null
+          utm_content?: string | null
         }
         Update: {
           assigned_to?: string | null
@@ -154,7 +168,14 @@ export type Database = {
           notes?: string | null
           phone?: string
           status?: string | null
+          cleaning_date?: string | null
           updated_at?: string | null
+          source?: string | null
+          utm_source?: string | null
+          utm_medium?: string | null
+          utm_campaign?: string | null
+          utm_term?: string | null
+          utm_content?: string | null
         }
         Relationships: [
           {
@@ -451,7 +472,16 @@ export type Database = {
         Returns: boolean
       }
       upsert_lead_from_webhook: {
-        Args: { p_name?: string; p_phone: string }
+        Args: {
+          p_name?: string
+          p_phone: string
+          p_source?: string
+          p_utm_source?: string
+          p_utm_medium?: string
+          p_utm_campaign?: string
+          p_utm_term?: string
+          p_utm_content?: string
+        }
         Returns: string
       }
     }
