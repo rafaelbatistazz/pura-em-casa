@@ -36,7 +36,8 @@ BEGIN
     'leadId', NEW.lead_id,
     'message', NEW.message_text,
     'media_url', NEW.media_url,
-    'media_type', NEW.media_type
+    'media_type', NEW.media_type,
+    'message_id', NEW.id
   );
 
   -- Call Edge Function via pg_net

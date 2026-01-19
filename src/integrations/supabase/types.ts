@@ -44,6 +44,30 @@ export type Database = {
         }
         Relationships: []
       }
+      documents: {
+        Row: {
+          id: string
+          content: string | null
+          metadata: Json | null
+          embedding: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          content?: string | null
+          metadata?: Json | null
+          embedding?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          content?: string | null
+          metadata?: Json | null
+          embedding?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       jewelry_items: {
         Row: {
           code: string

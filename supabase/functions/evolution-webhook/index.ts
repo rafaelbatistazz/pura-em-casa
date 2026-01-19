@@ -24,6 +24,17 @@ serve(async (req) => {
     console.log('Instance:', body.instance);
     console.log('Full body:', JSON.stringify(body, null, 2));
 
+    // --- DEBUG LOGGING ---
+    try {
+      await supabase.from('debug_events').insert({
+        event_type: body.event || 'unknown',
+        payload: body
+      });
+    } catch (err) {
+      console.error('Failed to log debug event:', err);
+    }
+    // ---------------------
+
     // Handle messages.upsert event (new messages)
     if (body.event === 'messages.upsert') {
       const data = body.data;
@@ -103,8 +114,10 @@ serve(async (req) => {
       }
 
       // Use media info from n8n if provided, otherwise use detected type
-      const finalMediaUrl = mediaUrlFromN8n;
+      let finalMediaUrl = mediaUrlFromN8n;
       const finalMediaType = mediaTypeFromN8n || mediaType;
+
+
 
       // Formata data para timestamp com offset -03:00 (igual ao front)
       const getSPTimestamp = (unixSeconds?: number) => {
@@ -149,6 +162,55 @@ serve(async (req) => {
         console.error('Error upserting lead:', leadError);
         throw leadError;
       }
+
+      // --- MEDIA HANDLING (Moved Here to access leadId and messageId) ---
+      if (mediaType && !finalMediaUrl) {
+        try {
+          console.log(`Attempting to fetch media for message ${messageId} (${mediaType})...`);
+
+          const evolutionUrl = Deno.env.get('EVOLUTION_API_URL');
+          const evolutionKey = Deno.env.get('EVOLUTION_API_KEY');
+          const instanceName = body.instance;
+
+          if (evolutionUrl && evolutionKey && instanceName) {
+            const response = await fetch(`${evolutionUrl}/chat/getBase64FromMediaMessage/${instanceName}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+              body: JSON.stringify({ message: { key: { id: data.key.id } } })
+            });
+
+            if (response.ok) {
+              const respJson = await response.json();
+              const base64 = respJson.base64;
+              if (base64) {
+                const binaryString = atob(base64);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+
+                let bucket = 'images';
+                let ext = 'jpg';
+                let mime = 'image/jpeg';
+                if (mediaType === 'video') { bucket = 'videos'; ext = 'mp4'; mime = 'video/mp4'; }
+                else if (mediaType === 'audio') { bucket = 'audios'; ext = 'mp3'; mime = 'audio/mpeg'; }
+                else if (mediaType === 'document') { bucket = 'documents'; ext = 'pdf'; mime = 'application/pdf'; }
+
+                const fileName = `${messageId}.${ext}`;
+                const filePath = `${leadId}/${fileName}`;
+
+                const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, bytes, { contentType: mime, upsert: true });
+
+                if (uploadError) console.error('Supabase Storage Upload Error:', uploadError);
+                else {
+                  const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(filePath);
+                  finalMediaUrl = publicUrlData.publicUrl;
+                  console.log('Media uploaded successfully:', finalMediaUrl);
+                }
+              } else console.error('Evolution API returned no base64:', respJson);
+            } else console.error('Evolution API Error:', await response.text());
+          } else console.warn('Missing Evolution config (URL/KEY/Instance), skipping media download.');
+        } catch (err) { console.error('Unexpected error handling media:', err); }
+      }
+      // ----------------------------------------------------------------
 
       console.log('Lead upserted with ID:', leadId);
 

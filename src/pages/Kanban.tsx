@@ -50,7 +50,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Lead, LeadStatus, User } from '@/types/database';
-import { Phone, Clock, Plus, Loader2, Trash2 } from 'lucide-react';
+import { Phone, Clock, Plus, Loader2, Trash2, DollarSign } from 'lucide-react';
 import type { User as UserType, LeadStatus as LeadStatusType } from '@/types/database';
 
 interface KanbanColumn {
@@ -61,11 +61,11 @@ interface KanbanColumn {
 
 const defaultColumns: KanbanColumn[] = [
   { id: 'Oportunidade', title: 'Oportunidade', color: 'bg-slate-500/20 text-slate-400' },
-  { id: 'Atendendo', title: 'Atendendo', color: 'bg-yellow-500/20 text-yellow-400' },
   { id: 'Proposta', title: 'Proposta', color: 'bg-blue-500/20 text-blue-400' },
   { id: 'Follow Up', title: 'Follow Up', color: 'bg-orange-500/20 text-orange-400' },
   { id: 'Agendado', title: 'Agendado', color: 'bg-teal-500/20 text-teal-400' },
   { id: 'Pós Venda', title: 'Pós Venda', color: 'bg-purple-500/20 text-purple-400' },
+  { id: 'Sumiu', title: 'Sumiu', color: 'bg-red-900/20 text-red-400' },
 ];
 const avatarColors = [
   'bg-primary',
@@ -78,6 +78,44 @@ const avatarColors = [
 interface LeadWithUser extends Lead {
   assigned_user?: { name: string } | null;
 }
+
+type DateFilterType = 'total' | 'today' | 'yesterday' | 'last7d' | 'last30d' | 'thisMonth' | 'lastMonth' | 'thisYear';
+
+const filterLeadsByDate = (leads: Lead[], filter: DateFilterType) => {
+  if (filter === 'total') return leads;
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  return leads.filter(lead => {
+    const leadDate = new Date(lead.created_at);
+    // Reset time for comparisons
+    const dateToCheck = new Date(leadDate.getFullYear(), leadDate.getMonth(), leadDate.getDate());
+
+    switch (filter) {
+      case 'today':
+        return dateToCheck.getTime() === today.getTime();
+      case 'yesterday':
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return dateToCheck.getTime() === yesterday.getTime();
+      case 'last7d':
+        const last7d = new Date(today);
+        last7d.setDate(last7d.getDate() - 7);
+        return dateToCheck >= last7d;
+      case 'thisMonth':
+        return dateToCheck.getMonth() === today.getMonth() && dateToCheck.getFullYear() === today.getFullYear();
+      case 'lastMonth':
+        const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const endLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+        return dateToCheck >= lastMonth && dateToCheck <= endLastMonth;
+      case 'thisYear':
+        return dateToCheck.getFullYear() === today.getFullYear();
+      default:
+        return true;
+    }
+  });
+};
 
 interface SortableLeadCardProps {
   lead: LeadWithUser;
@@ -143,15 +181,18 @@ function LeadCard({ lead, onEdit }: { lead: LeadWithUser; onEdit: (lead: LeadWit
   };
 
   const formatPhone = (phone: string) => {
+    // Remove WhatsApp suffix if present
+    const cleanRaw = phone.split('@')[0];
+
     if (role !== 'admin') {
-      return maskPhone(phone);
+      return maskPhone(cleanRaw);
     }
 
-    const cleaned = phone.replace(/\D/g, '');
+    const cleaned = cleanRaw.replace(/\D/g, '');
     if (cleaned.length === 13) {
       return `+${cleaned.slice(0, 2)} (${cleaned.slice(2, 4)}) ${cleaned.slice(4, 9)}-${cleaned.slice(9)}`;
     }
-    return phone;
+    return cleanRaw;
   };
 
   const handleClick = (e: React.MouseEvent) => {
@@ -199,6 +240,13 @@ function LeadCard({ lead, onEdit }: { lead: LeadWithUser; onEdit: (lead: LeadWit
               <Clock className="h-3 w-3" />
               <span>{formatRelativeTime(lead.created_at)}</span>
             </div>
+            {/* Show Budget if exists */}
+            {(lead.budget || 0) > 0 && (
+              <div className="flex items-center gap-1 text-xs font-semibold text-green-600 mt-2 bg-green-50 px-2 py-1 rounded-md w-fit">
+                <DollarSign className="h-3 w-3" />
+                <span>R$ {new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2 }).format(lead.budget || 0)}</span>
+              </div>
+            )}
           </div>
         </div>
       </CardContent>
@@ -257,24 +305,20 @@ export default function Kanban() {
   const [editLeadAssignedTo, setEditLeadAssignedTo] = useState<string>('');
   const [editLeadNotes, setEditLeadNotes] = useState<string>('');
   const [editLeadCleaningDate, setEditLeadCleaningDate] = useState<string>('');
+  const [editLeadBudget, setEditLeadBudget] = useState<string>('');
   const [savingLead, setSavingLead] = useState(false);
   const [deletingLead, setDeletingLead] = useState(false);
 
+  // Date Filter State
+  const [dateFilter, setDateFilter] = useState<DateFilterType>('total');
+
+  // Filtered Leads Calculation
+  const filteredLeads = filterLeadsByDate(leads, dateFilter);
+
   const sensors = useSensors(
-    useSensor(MouseSensor, {
-      activationConstraint: {
-        distance: 10,
-      },
-    }),
-    useSensor(TouchSensor, {
-      activationConstraint: {
-        delay: 250,
-        tolerance: 5,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), // Prevent accidental drags
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
   const fetchLeads = useCallback(async () => {
@@ -351,6 +395,7 @@ export default function Kanban() {
     setCreatingLead(true);
     try {
       // PROACTIVE DUPLICATE CHECK (Secure RPC)
+      // @ts-ignore
       const { data: checkData, error: checkError } = await supabase
         .rpc('check_lead_status', { phone_number: phone });
 
@@ -399,6 +444,7 @@ export default function Kanban() {
     setEditLeadAssignedTo(lead.assigned_to || 'none');
     setEditLeadNotes(lead.notes || '');
     setEditLeadCleaningDate(lead.cleaning_date ? lead.cleaning_date.split('T')[0] : '');
+    setEditLeadBudget(lead.budget ? String(lead.budget) : '');
     setEditLeadOpen(true);
   };
 
@@ -415,6 +461,8 @@ export default function Kanban() {
 
     setSavingLead(true);
     try {
+      const budgetValue = editLeadBudget ? parseFloat(editLeadBudget.replace(',', '.')) : null;
+
       const { error } = await supabase
         .from('leads')
         .update({
@@ -425,6 +473,7 @@ export default function Kanban() {
           assigned_to: editLeadAssignedTo && editLeadAssignedTo !== 'none' ? editLeadAssignedTo : null,
           notes: editLeadNotes || null,
           cleaning_date: editLeadCleaningDate ? new Date(editLeadCleaningDate).toISOString() : null,
+          budget: budgetValue,
           updated_at: getSaoPauloTimestamp(),
         } as never)
         .eq('id', editingLead.id);
@@ -508,6 +557,12 @@ export default function Kanban() {
           fetchLeads();
         } else {
           toast.success('Status atualizado');
+          // NOTIFY ADMIN IF MOVED TO AGENDADO OR PROPOSTA
+          if (targetColumn.id === 'agendado' || targetColumn.id === 'proposta') {
+            supabase.functions.invoke('notify-admin', {
+              body: { lead_id: activeIdStr, status: targetColumn.id }
+            }).catch(console.error);
+          }
         }
       }
     } else {
@@ -532,79 +587,133 @@ export default function Kanban() {
           fetchLeads();
         } else {
           toast.success('Status atualizado');
+          // NOTIFY ADMIN IF MOVED TO AGENDADO OR PROPOSTA
+          if (overLead.status === 'agendado' || overLead.status === 'proposta') {
+            supabase.functions.invoke('notify-admin', {
+              body: { lead_id: activeIdStr, status: overLead.status }
+            }).catch(console.error);
+          }
         }
       }
     }
   };
 
   const getLeadsByStatus = (status: LeadStatus) => {
-    return leads.filter((lead) => lead.status === status);
+    return filteredLeads.filter((lead) => lead.status === status);
   };
 
   const activeLead = activeId ? leads.find((lead) => lead.id === activeId) : null;
 
   return (
     <div className="h-full flex flex-col p-4 lg:p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl lg:text-3xl font-bold text-foreground">Kanban</h1>
-          <p className="text-muted-foreground">Gerencie seus leads visualmente</p>
+      <div className="flex flex-col gap-4 mb-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Kanban</h1>
+            <p className="text-muted-foreground text-sm sm:text-base mt-1">
+              Gerencie seus leads
+            </p>
+          </div>
         </div>
-        <div className="flex gap-2">
+
+        {/* Action Bar: Full width on mobile, right-aligned on desktop (via parent if needed, but here simplified) */}
+        <div className="flex items-center gap-2 w-full sm:w-auto sm:self-end">
+          <Select value={dateFilter} onValueChange={(v) => setDateFilter(v as DateFilterType)}>
+            <SelectTrigger className="w-full sm:w-[180px] bg-background">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-muted-foreground" />
+                <SelectValue placeholder="Período" />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="total">Total (Todos)</SelectItem>
+              <SelectItem value="today">Hoje</SelectItem>
+              <SelectItem value="yesterday">Ontem</SelectItem>
+              <SelectItem value="last7d">Últimos 7 dias</SelectItem>
+              <SelectItem value="thisMonth">Este Mês</SelectItem>
+              <SelectItem value="lastMonth">Mês Passado</SelectItem>
+              <SelectItem value="thisYear">Este Ano</SelectItem>
+            </SelectContent>
+          </Select>
 
           <Dialog open={newLeadOpen} onOpenChange={setNewLeadOpen}>
             <DialogTrigger asChild>
-              <Button>
+              <Button className="w-full sm:w-auto">
                 <Plus className="mr-2 h-4 w-4" />
                 Novo Lead
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-h-[90vh] overflow-y-auto">
+            {/* ... Dialog Content remains same ... */}
+            <DialogContent className="sm:max-w-[425px]">
               <DialogHeader>
-                <DialogTitle>Novo Lead</DialogTitle>
-                <DialogDescription>Adicione um novo lead ao sistema</DialogDescription>
+                <DialogTitle>Criar Novo Lead</DialogTitle>
+                <DialogDescription>
+                  Preencha os dados do novo lead abaixo.
+                </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label>Nome *</Label>
+              {/* ... form content ... */}
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="name">Nome</Label>
                   <Input
+                    id="name"
                     value={newLeadName}
                     onChange={(e) => setNewLeadName(e.target.value)}
-                    placeholder="Nome do lead"
+                    placeholder="Nome do cliente"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Telefone *</Label>
+                <div className="grid gap-2">
+                  <Label htmlFor="phone">Telefone</Label>
                   <Input
+                    id="phone"
                     value={newLeadPhone}
-                    onChange={(e) => setNewLeadPhone(e.target.value)}
-                    placeholder="(11) 99999-9999"
+                    onChange={(e) => {
+                      // Only allow numbers, spaces, parens, dash, plus
+                      const val = e.target.value;
+                      if (/^[0-9+\-()\s]*$/.test(val)) {
+                        setNewLeadPhone(val);
+                      }
+                    }}
+                    placeholder="+55 (11) 99999-9999"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Status</Label>
+                <div className="grid gap-2">
+                  <Label htmlFor="source">Origem</Label>
+                  <Input
+                    id="source"
+                    value={newLeadSource}
+                    onChange={(e) => setNewLeadSource(e.target.value)}
+                    placeholder="Ex: Instagram, Google, Indicação"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="status">Status Inicial</Label>
                   <Select value={newLeadStatus} onValueChange={(v) => setNewLeadStatus(v as LeadStatusType)}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {columns.map((col) => (
+                      {columns.map(col => (
                         <SelectItem key={col.id} value={col.id}>{col.title}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Admin assignment logic */}
                 {role === 'admin' && (
-                  <div className="space-y-2">
-                    <Label>Responsável</Label>
+                  <div className="grid gap-2">
+                    <Label htmlFor="assigned_to">Atribuir a</Label>
                     <Select value={newLeadAssignedTo} onValueChange={setNewLeadAssignedTo}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Selecione um responsável" />
+                        <SelectValue placeholder="Selecione um usuário" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">Nenhum</SelectItem>
+                        <SelectItem value="none">Ninguém (eu)</SelectItem>
                         {users.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.name}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -612,16 +721,9 @@ export default function Kanban() {
                 )}
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setNewLeadOpen(false)}>Cancelar</Button>
                 <Button onClick={handleCreateLead} disabled={creatingLead}>
-                  {creatingLead ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Criando...
-                    </>
-                  ) : (
-                    'Criar Lead'
-                  )}
+                  {creatingLead && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Criar Lead
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -660,6 +762,15 @@ export default function Kanban() {
                 value={editLeadSource}
                 onChange={(e) => setEditLeadSource(e.target.value)}
                 placeholder="Ex: Facebook, Instagram, Google"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Orçamento (R$)</Label>
+              <Input
+                type="number"
+                value={editLeadBudget}
+                onChange={(e) => setEditLeadBudget(e.target.value)}
+                placeholder="0.00"
               />
             </div>
             <div className="space-y-2">
@@ -781,12 +892,20 @@ export default function Kanban() {
                       </div>
                     ) : (
                       <SortableContext
-                        items={columnLeads.map((lead) => lead.id)}
+                        items={filteredLeads.filter((lead) => lead.status === column.id).map((lead) => lead.id)}
                         strategy={verticalListSortingStrategy}
                       >
-                        {columnLeads.map((lead) => (
-                          <SortableLeadCard key={lead.id} lead={lead} onEdit={handleEditLead} />
-                        ))}
+                        <div className="space-y-3">
+                          {filteredLeads
+                            .filter((lead) => lead.status === column.id)
+                            .map((lead) => (
+                              <SortableLeadCard
+                                key={lead.id}
+                                lead={lead}
+                                onEdit={handleEditLead}
+                              />
+                            ))}
+                        </div>
                       </SortableContext>
                     )}
                   </div>

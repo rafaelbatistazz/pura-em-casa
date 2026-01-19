@@ -5,7 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { Users, UserPlus, TrendingUp, MessageSquare, CalendarIcon, ChevronDown } from 'lucide-react';
+import { Users, UserPlus, TrendingUp, MessageSquare, CalendarIcon, ChevronDown, DollarSign } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 
 import { cn, getSaoPauloTimestamp, formatDisplayTime } from '@/lib/utils';
@@ -137,13 +137,37 @@ export default function Dashboard() {
       .sort((a, b) => b.value - a.value);
   }, [filteredLeads]);
 
+  // Calculate Financial Metrics with Filtered Leads
+  // "Dinheiro na Mesa": Status 'Proposta' + Budget
+  const leadsEmProposta = filteredLeads.filter(l => l.status === 'Proposta' && (l.budget || 0) > 0);
+  const totalProposta = leadsEmProposta.reduce((acc, curr) => acc + Number(curr.budget || 0), 0);
+  const countProposta = leadsEmProposta.length;
+
+  // "Faturamento": Status 'Agendado' + Budget
+  const leadsAgendado = filteredLeads.filter(l => l.status === 'Agendado' && (l.budget || 0) > 0);
+  const totalFaturamento = leadsAgendado.reduce((acc, curr) => acc + Number(curr.budget || 0), 0);
+  const countAgendado = leadsAgendado.length;
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+  };
+
   const stats = [
     {
-      title: 'Total de Leads',
-      value: filteredLeads.length,
-      icon: Users,
-      color: 'text-primary',
-      bgColor: 'bg-primary/10',
+      title: 'Dinheiro na Mesa',
+      value: formatCurrency(totalProposta),
+      subValue: `${countProposta} propostas`,
+      icon: DollarSign,
+      color: 'text-orange-500',
+      bgColor: 'bg-orange-500/10',
+    },
+    {
+      title: 'Faturamento',
+      value: formatCurrency(totalFaturamento),
+      subValue: `${countAgendado} agendamentos`,
+      icon: TrendingUp,
+      color: 'text-green-500',
+      bgColor: 'bg-green-500/10',
     },
     {
       title: 'Leads Hoje',
@@ -151,13 +175,6 @@ export default function Dashboard() {
       icon: UserPlus,
       color: 'text-success',
       bgColor: 'bg-success/10',
-    },
-    {
-      title: 'Taxa de Conversão',
-      value: `${conversionRate}%`,
-      icon: TrendingUp,
-      color: 'text-warning',
-      bgColor: 'bg-warning/10',
     },
     {
       title: 'Em Atendimento',
@@ -264,6 +281,8 @@ export default function Dashboard() {
                 <div>
                   <p className="text-xs lg:text-sm text-muted-foreground">{stat.title}</p>
                   <p className="text-xl lg:text-3xl font-bold mt-1">{stat.value}</p>
+                  {/* @ts-ignore */}
+                  {stat.subValue && <p className="text-xs text-muted-foreground mt-1">{stat.subValue}</p>}
                 </div>
                 <div className={`p-2 lg:p-3 rounded-lg ${stat.bgColor}`}>
                   <stat.icon className={`h-4 w-4 lg:h-5 lg:w-5 ${stat.color}`} />

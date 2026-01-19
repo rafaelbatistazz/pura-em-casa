@@ -87,47 +87,40 @@ Deno.serve(async (req) => {
             // Stage 4 -> 72hours -> Stage 5
 
             if (lead.followup_stage === 0 && diffMinutes >= 10) {
-                triggerType = '10min';
+                triggerType = '10m';
                 nextStage = 1;
             } else if (lead.followup_stage === 1 && diffMinutes >= 60) {
-                triggerType = '1hour';
+                triggerType = '1h';
                 nextStage = 2;
             } else if (lead.followup_stage === 2 && diffMinutes >= 1440) { // 24h
-                triggerType = '24hours'; // Matches webhook endpoint names
+                triggerType = '24h';
                 nextStage = 3;
             } else if (lead.followup_stage === 3 && diffMinutes >= 2880) { // 48h
-                triggerType = '48hours';
+                triggerType = '48h';
                 nextStage = 4;
             } else if (lead.followup_stage === 4 && diffMinutes >= 4320) { // 72h
-                triggerType = '72hours';
+                triggerType = '72h';
                 nextStage = 5;
             }
 
             if (triggerType) {
                 console.log(`Triggering ${triggerType} for lead ${lead.name} (${lead.phone})`);
 
-                // Get last 50 messages sorted
-                const sortedMessages = (lead.messages || [])
-                    .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-                    .slice(0, 50)
-                    .reverse();
-
-                const payload = {
-                    lead: { ...lead, messages: undefined },
-                    history: sortedMessages,
-                    instance: instanceName,
-                    trigger: triggerType,
-                    followup_count: nextStage // Sending the new stage number as the "count"
-                };
-
-                const webhookUrl = `https://n8n.advfunnel.com.br/webhook/6da3b3bb-9c54-4b03-8551-53da0b95b3d5/${triggerType}`;
+                const functionUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/ai-followup`;
+                const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
                 actions.push((async () => {
                     try {
-                        const res = await fetch(webhookUrl, {
+                        const res = await fetch(functionUrl, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${serviceKey}`
+                            },
+                            body: JSON.stringify({
+                                lead_id: lead.id,
+                                elapsed_time: triggerType
+                            })
                         });
 
                         // We check OK Status
@@ -138,7 +131,7 @@ Deno.serve(async (req) => {
                                 .eq('id', lead.id);
                             return { success: true, leadId: lead.id, type: triggerType };
                         } else {
-                            console.error(`Failed to call webhook for ${lead.id}: ${res.statusText}`);
+                            console.error(`Failed to call ai-followup for ${lead.id}: ${res.statusText}`);
                             return { success: false, leadId: lead.id, error: res.statusText };
                         }
                     } catch (err) {

@@ -178,7 +178,7 @@ export default function Conversas() {
   // Clear History Wrapper
   const handleClearHistoryWrapper = async () => {
     if (!selectedLead) return;
-    if (!confirm('Limpar histórico de mensagens? (Essa ação é irreversível)')) return;
+    // Confirmation handled in ClientDetailsSheet
 
     const { error } = await supabase
       .from('messages')
@@ -198,7 +198,7 @@ export default function Conversas() {
   // Delete Lead Wrapper
   const handleDeleteLeadWrapper = async () => {
     if (!selectedLead) return;
-    if (!confirm('Tem certeza que deseja excluir este lead e todas as mensagens?')) return;
+    // Confirmation handled in ClientDetailsSheet
 
     const { error } = await supabase
       .from('leads')
@@ -963,7 +963,7 @@ export default function Conversas() {
 
       setSelectedLead({ ...selectedLead, notes: editingNotes });
       setLeads(prev => prev.map(l => l.id === selectedLead.id ? { ...l, notes: editingNotes } : l));
-      setNotesOpen(false);
+      // setNotesOpen(false); // Undefined
       toast.success('Observações salvas!');
     } catch {
       toast.error('Erro ao salvar observações');
@@ -1392,7 +1392,7 @@ export default function Conversas() {
                   </div>
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-muted-foreground truncate pr-2">
-                      {lead.last_message ? truncateMessage(lead.last_message) : lead.phone}
+                      {lead.last_message ? truncateMessage(lead.last_message) : displayPhone(lead.phone)}
                     </p>
                     {lead.unread_count && lead.unread_count > 0 ? (
                       <Badge className="h-5 min-w-[20px] bg-primary text-primary-foreground text-xs font-bold rounded-full px-1.5">

@@ -31,6 +31,7 @@ export interface Lead {
   utm_term?: string | null;
   utm_content?: string | null;
   users?: User;
+  budget?: number | null;
 }
 
 export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'sticker' | null;
@@ -127,6 +128,7 @@ export interface Database {
           utm_campaign?: string | null;
           utm_term?: string | null;
           utm_content?: string | null;
+          budget?: number | null;
         };
         Update: {
           phone?: string;
@@ -143,6 +145,7 @@ export interface Database {
           utm_campaign?: string | null;
           utm_term?: string | null;
           utm_content?: string | null;
+          budget?: number | null;
         };
       };
       messages: {
