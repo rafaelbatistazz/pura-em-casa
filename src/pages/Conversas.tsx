@@ -100,9 +100,9 @@ export default function Conversas() {
   const { user, role } = useAuth();
 
   // Helper to display phone
-  const displayPhone = (phone: string) => {
+  const displayPhone = (phone: string, assignedTo?: string | null) => {
     const cleanPhone = phone?.split('@')[0] || '';
-    if (role === 'admin') return cleanPhone;
+    if (role === 'admin' || (user && assignedTo === user.id)) return cleanPhone;
     return maskPhone(cleanPhone);
   };
 
@@ -226,11 +226,11 @@ export default function Conversas() {
       .select('*')
       .order('updated_at', { ascending: false });
 
-    // FILTRO REMOVIDO: Deixar o RLS do banco decidir quem vê o que.
-    // Isso evita que leads "sumam" se o frontend achar que o usuário não é admin.
-    // if (role !== 'admin' && user) {
-    //   query = query.eq('assigned_to', user.id);
-    // }
+    // Filter leads based on user role
+    // Non-admin users should only see leads assigned to them
+    if (role !== 'admin' && user) {
+      query = query.eq('assigned_to', user.id);
+    }
 
     const { data, error } = await query;
 
@@ -311,9 +311,9 @@ export default function Conversas() {
   // Initial fetch and realtime subscription
   useEffect(() => {
     fetchLeads();
-    if (role === 'admin') {
-      fetchUsers();
-    }
+    fetchLeads();
+    // Allow all users to fetch profiles for name mapping
+    fetchUsers();
 
     // Consolidated global channel for both leads and messages
     const globalChannel = supabase
@@ -1392,7 +1392,7 @@ export default function Conversas() {
                   </div>
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-muted-foreground truncate pr-2">
-                      {lead.last_message ? truncateMessage(lead.last_message) : displayPhone(lead.phone)}
+                      {lead.last_message ? truncateMessage(lead.last_message) : displayPhone(lead.phone, lead.assigned_to)}
                     </p>
                     {lead.unread_count && lead.unread_count > 0 ? (
                       <Badge className="h-5 min-w-[20px] bg-primary text-primary-foreground text-xs font-bold rounded-full px-1.5">
@@ -1442,8 +1442,8 @@ export default function Conversas() {
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium truncate text-sm text-foreground leading-tight">{selectedLead.name || displayPhone(selectedLead.phone)}</p>
-                    <p className="text-xs text-muted-foreground truncate">{selectedLead.name ? displayPhone(selectedLead.phone) : ''}</p>
+                    <p className="font-medium truncate text-sm text-foreground leading-tight">{selectedLead.name || displayPhone(selectedLead.phone, selectedLead.assigned_to)}</p>
+                    <p className="text-xs text-muted-foreground truncate">{selectedLead.name ? displayPhone(selectedLead.phone, selectedLead.assigned_to) : ''}</p>
                   </div>
                 </div>
               </div>

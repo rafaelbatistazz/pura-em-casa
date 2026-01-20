@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-serve(async (req) => {
+serve(async (req: Request) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -163,6 +163,14 @@ serve(async (req) => {
         throw leadError;
       }
 
+      // 1.5 Update Lead Instance Name (Multi-Instance Support)
+      if (body.instance) {
+        await supabase
+          .from('leads')
+          .update({ instance_name: body.instance })
+          .eq('id', leadId);
+      }
+
       // --- MEDIA HANDLING (Moved Here to access leadId and messageId) ---
       if (mediaType && !finalMediaUrl) {
         try {
@@ -187,12 +195,19 @@ serve(async (req) => {
                 const bytes = new Uint8Array(binaryString.length);
                 for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
 
-                let bucket = 'images';
+                let bucket = 'chat-media';
                 let ext = 'jpg';
                 let mime = 'image/jpeg';
-                if (mediaType === 'video') { bucket = 'videos'; ext = 'mp4'; mime = 'video/mp4'; }
-                else if (mediaType === 'audio') { bucket = 'audios'; ext = 'mp3'; mime = 'audio/mpeg'; }
-                else if (mediaType === 'document') { bucket = 'documents'; ext = 'pdf'; mime = 'application/pdf'; }
+
+                if (mediaType === 'video') { ext = 'mp4'; mime = 'video/mp4'; }
+                else if (mediaType === 'audio') {
+                  // WhatsApp usually sends OGG/Opus. We'll save as mp3/ogg to be safe or keep original? 
+                  // Let's stick to a generic extension or try to interpret content type if possible.
+                  // For now, let's fix the bucket and assume mp3/ogg compatibility.
+                  ext = 'mp3';
+                  mime = 'audio/mpeg';
+                }
+                else if (mediaType === 'document') { ext = 'pdf'; mime = 'application/pdf'; }
 
                 const fileName = `${messageId}.${ext}`;
                 const filePath = `${leadId}/${fileName}`;

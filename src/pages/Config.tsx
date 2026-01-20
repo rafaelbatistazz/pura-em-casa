@@ -54,9 +54,11 @@ import {
   LogOut,
   Bot,
   Brain,
+  Phone,
+  RefreshCw,
 } from 'lucide-react';
 import { KnowledgeBase } from '@/components/KnowledgeBase';
-import type { User as UserType, UserRole, SystemConfig, MessageShortcut, LeadDistribution, LeadDistributionConfig } from '@/types/database';
+import type { User as UserType, UserRole, SystemConfig, MessageShortcut, LeadDistribution, LeadDistributionConfig, Instance, InstanceProvider } from '@/types/database';
 
 export default function Config() {
   const { user, userData, updatePassword, role, signOut } = useAuth();
@@ -104,11 +106,17 @@ export default function Config() {
   const [editEmail, setEditEmail] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
 
+  // Instances List
+  const [instances, setInstances] = useState<Instance[]>([]);
+
   // New Instance Form
   const [newInstanceOpen, setNewInstanceOpen] = useState(false);
   const [newInstanceName, setNewInstanceName] = useState('');
   const [creatingInstance, setCreatingInstance] = useState(false);
-  const [instanceName, setInstanceName] = useState('');
+  const [provider, setProvider] = useState<InstanceProvider>('evolution');
+  const [metaBusinessId, setMetaBusinessId] = useState('');
+  const [metaPhoneId, setMetaPhoneId] = useState('');
+  const [metaAccessToken, setMetaAccessToken] = useState('');
 
   // Lead Distribution
   const [leadDistributionEnabled, setLeadDistributionEnabled] = useState(false);
@@ -405,41 +413,26 @@ Gostaria de agendar um horário conosco? 🤗"
     }
 
     setCreatingUser(true);
+    setCreatingUser(true);
     try {
-      // TRUQUE DO "CLIENTE TEMPORÁRIO":
-      // Criamos uma instância isolada do Supabase para criar o usuário SEM deslogar o admin.
-      // Isso elimina a necessidade de Edge Functions.
-      const tempSupabase = createClient(
-        import.meta.env.VITE_SUPABASE_URL,
-        import.meta.env.VITE_SUPABASE_ANON_KEY,
-        {
-          auth: {
-            persistSession: false, // IMPORTANTE: Não salva sessão, não desloga o admin
-            autoRefreshToken: false,
-            detectSessionInUrl: false
-          }
-        }
-      );
-
-      // 1. Criar o usuário no Auth
-      const { data: authData, error: authError } = await tempSupabase.auth.signUp({
-        email: newUserEmail,
-        password: newUserPassword,
-        options: {
-          data: {
-            name: newUserName // Passa o metadata para o trigger usar
-          }
+      // Create user via Edge Function (Auto-Confirm)
+      const { data, error } = await supabase.functions.invoke('admin-create-user', {
+        body: {
+          email: newUserEmail,
+          password: newUserPassword,
+          name: newUserName,
+          role: 'user' // Default role
         }
       });
 
-      if (authError) throw authError;
-      if (!authData.user) throw new Error('Erro ao criar usuário (sem dados retornados)');
+      if (error) throw error; // Function error (e.g. unauthorized)
+      if (data?.error) throw new Error(data.error); // Application error within function
 
-      const newUserId = authData.user.id;
+      const newUserId = data.user.id;
 
       // 2. Atualizar o Role (se for admin)
-      // O trigger já criou o usuário como 'user' (ou 'admin' se for o primeiro).
-      // Agora garantimos o role escolhido.
+      // O Edge Function já garante o update, mas podemos reforçar aqui se necessário.
+      // O importante é que o usuário já nasce confirmado.
       if (newUserRole) {
         // Aguardamos um pouco para garantir que o trigger rodou
         await new Promise(r => setTimeout(r, 1000));
@@ -521,14 +514,13 @@ Gostaria de agendar um horário conosco? 🤗"
   };
 
   const fetchConfigs = useCallback(async () => {
+    // 1. Fetch System Config (Legacy & General Settings)
     const { data: configsData, error: configsError } = await supabase
       .from('system_config')
       .select('*');
 
     if (!configsError && configsData) {
       setConfigs(configsData as SystemConfig[]);
-      const savedInstanceName = (configsData as SystemConfig[]).find((c) => c.key === 'evolution_instance_name')?.value || '';
-      setInstanceName(savedInstanceName);
       setWebhookIncoming((configsData as SystemConfig[]).find((c) => c.key === 'webhook_incoming_url')?.value || '');
       setWebhookOutgoing((configsData as SystemConfig[]).find((c) => c.key === 'webhook_outgoing_url')?.value || '');
 
@@ -542,9 +534,20 @@ Gostaria de agendar um horário conosco? 🤗"
         }
       }
 
-      // Load Alert Phone
       const alertConfig = configsData.find(c => c.key === 'alert_notification_phone');
       if (alertConfig) setAlertPhone(JSON.parse(alertConfig.value || '""'));
+    }
+
+    // 2. Fetch ALL Instances
+    const { data: instancesData, error: instanceError } = await supabase
+      .from('instances')
+      .select('*')
+      .order('instance_name');
+
+    if (!instanceError && instancesData) {
+      setInstances(instancesData as Instance[]);
+      const anyConnected = (instancesData as Instance[]).some(i => i.status === 'connected');
+      setConnectionStatus(anyConnected ? 'connected' : 'disconnected');
     }
   }, []);
 
@@ -724,63 +727,80 @@ Gostaria de agendar um horário conosco? 🤗"
     setLoading(false);
   }, [userData, role, fetchUsers, fetchConfigs, fetchShortcuts, fetchDistributionConfig, fetchDistributionUsers]);
 
+  // Re-implemented checkConnectionStatus for Multi-Instance
   const checkConnectionStatus = useCallback(async () => {
-    if (!instanceName) {
-      setConnectionStatus('disconnected');
-      return;
-    }
+    // Only check if we have instances loaded to avoid unnecessary calls
+    if (instances.length === 0) return;
 
-    try {
-      const response = await fetch(`${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`, {
-        headers: { apikey: EVOLUTION_API_KEY },
-      });
-      const data = await response.json();
+    let hasUpdate = false;
+    const updatedInstances = [...instances];
 
-      if (data.instance?.state === 'open') {
-        setConnectionStatus('connected');
-        setQrCode(null);
-      } else {
-        setConnectionStatus('disconnected');
+    for (let i = 0; i < updatedInstances.length; i++) {
+      const instance = updatedInstances[i];
+      if (instance.provider !== 'evolution') continue; // Skip Meta for now
+
+      try {
+        const response = await fetch(`${EVOLUTION_API_URL}/instance/connectionState/${instance.instance_name}`, {
+          headers: { apikey: EVOLUTION_API_KEY },
+        });
+        const data = await response.json();
+
+        const newState = data.instance?.state === 'open' ? 'connected' : 'disconnected';
+
+        if (instance.status !== newState) {
+          updatedInstances[i] = { ...instance, status: newState };
+          hasUpdate = true;
+
+          // Update DB silently
+          await supabase.from('instances').update({ status: newState }).eq('id', instance.id);
+        }
+      } catch (error) {
+        console.error(`Error checking status for ${instance.instance_name}:`, error);
       }
-    } catch {
-      setConnectionStatus('disconnected');
     }
-  }, [instanceName]);
 
+    if (hasUpdate) {
+      setInstances(updatedInstances);
+      const anyConnected = updatedInstances.some(i => i.status === 'connected');
+      setConnectionStatus(anyConnected ? 'connected' : 'disconnected');
+    }
+  }, [instances]);
+
+  // Polling for connection status
   useEffect(() => {
-    if (instanceName) {
-      checkConnectionStatus();
-      const interval = setInterval(checkConnectionStatus, 5000);
+    if (role === 'admin' && instances.length > 0) {
+      checkConnectionStatus(); // Initial check
+      const interval = setInterval(checkConnectionStatus, 10000); // Check every 10s
       return () => clearInterval(interval);
     }
-  }, [instanceName, checkConnectionStatus]);
+  }, [role, instances.length, checkConnectionStatus]);
 
-  const generateQRCode = async () => {
-    if (!instanceName) return;
-
-    setConnectionStatus('connecting');
+  const generateQRCode = async (instance: Instance) => {
     try {
-      const response = await fetch(`${EVOLUTION_API_URL} /instance/connect / ${instanceName} `, {
-        method: 'GET', // Changed to GET as per typical Evolution API usage for connection state/QR
+      if (instance.provider !== 'evolution') return;
+
+      const response = await fetch(`${EVOLUTION_API_URL}/instance/connect/${instance.instance_name}`, {
+        method: 'GET',
         headers: { apikey: EVOLUTION_API_KEY },
       });
 
       const data = await response.json();
+      console.log('QR Code Response:', data);
 
-      console.log('QR Code Response:', data); // Debug log
-
-      if (data.qrcode?.base64) {
-        setQrCode(data.qrcode.base64);
-      } else if (data.base64) {
-        setQrCode(data.base64);
+      if (data.qrcode?.base64 || data.base64) {
+        // Update local state temporarily to show QR
+        setInstances(prev => prev.map(i =>
+          i.instance_name === instance.instance_name
+            ? { ...i, qr_code: data.qrcode?.base64 || data.base64, status: 'connecting' }
+            : i
+        ));
       } else if (data.instance?.state === 'open') {
-        setConnectionStatus('connected');
         toast.success('WhatsApp conectado!');
+        checkConnectionStatus(); // Force status update
       }
     } catch (error) {
       console.error('Error generating QR Code:', error);
       toast.error('Erro ao gerar QR Code');
-      setConnectionStatus('disconnected');
     }
   };
 
@@ -790,89 +810,103 @@ Gostaria de agendar um horário conosco? 🤗"
       return;
     }
 
+    if (provider === 'meta') {
+      if (!metaBusinessId || !metaPhoneId || !metaAccessToken) {
+        toast.error('Preencha todas as credenciais da Meta');
+        return;
+      }
+    }
+
     setCreatingInstance(true);
     try {
-      // 1. Create Instance in Evolution
-      const response = await fetch(`${EVOLUTION_API_URL} /instance/create`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: EVOLUTION_API_KEY,
-        },
-        body: JSON.stringify({
-          instanceName: newInstanceName,
-          token: crypto.randomUUID(), // Secure random token
-          qrcode: true,
-          integration: 'WHATSAPP-BAILEYS',
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Erro ao criar instância');
-      }
-
-      // 2. Save instance name to Supabase
-      const { error } = await supabase
-        .from('system_config')
-        .upsert({ key: 'evolution_instance_name', value: newInstanceName }, { onConflict: 'key' });
-
-      if (error) throw error;
-
-      setInstanceName(newInstanceName);
-      setNewInstanceOpen(false);
-      setNewInstanceName('');
-      toast.success('WhatsApp criado! Clique em Conectar.');
-      fetchConfigs();
-
-      // 3. Trigger N8N Webhook
-      try {
-        await fetch(`https://n8n.advfunnel.com.br/webhook/5f27db92-6051-4d28-9ff0-9047f6622c82/puraemcasawebhookinstancia`, {
+      if (provider === 'evolution') {
+        // 1. Create Instance in Evolution
+        const response = await fetch(`${EVOLUTION_API_URL}/instance/create`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: EVOLUTION_API_KEY,
+          },
           body: JSON.stringify({
             instanceName: newInstanceName,
-            status: 'created',
-            phone: null // Phone is not available until connection
+            token: 'random_token',
+            qrcode: true,
           }),
         });
-      } catch (webhookError) {
-        console.error('Error triggering N8N webhook:', webhookError);
-        // Do not block UI success
+
+        const data = await response.json();
+
+        // 2. Save to Supabase
+        const { error } = await supabase.from('instances').insert({
+          instance_name: newInstanceName,
+          api_url: EVOLUTION_API_URL,
+          api_key: EVOLUTION_API_KEY,
+          qr_code: data.qrcode?.base64 || null,
+          status: 'connecting',
+          provider: 'evolution',
+        });
+
+        if (error) throw error;
+      } else {
+        // META PROVIDER
+        const { error } = await supabase.from('instances').insert({
+          instance_name: newInstanceName,
+          provider: 'meta',
+          meta_business_id: metaBusinessId,
+          meta_phone_id: metaPhoneId,
+          meta_access_token: metaAccessToken,
+          status: 'connected',
+          api_url: 'https://graph.facebook.com', // Placeholder
+          api_key: 'meta', // Placeholder
+        });
+
+        if (error) throw error;
       }
-    } catch (error: any) {
+
+      toast.success('Instância criada com sucesso!');
+      setNewInstanceOpen(false);
+      // Remove setInstanceName - using list now
+      // Remove upsert system_config - deprecated
+      fetchConfigs();
+
+    } catch (error) {
       console.error('Error creating instance:', error);
-      toast.error(error.message || 'Erro ao criar instância');
+      toast.error('Erro ao criar instância');
     } finally {
       setCreatingInstance(false);
     }
   };
 
-  const handleDeleteInstance = async () => {
-    if (!confirm('Tem certeza? Isso irá desconectar o WhatsApp.')) return;
+  /* Handlers de Instância */
+  const handleDeleteInstance = async (targetInstance: Instance) => {
+    if (!confirm(`Tem certeza? Isso irá desconectar o WhatsApp "${targetInstance.instance_name}".\n\nO HISTÓRICO DE CONVERSAS SERÁ MANTIDO.`)) return;
 
     try {
-      // 1. Logout/Delete from Evolution
-      await fetch(`${EVOLUTION_API_URL}/instance/logout/${instanceName}`, {
-        method: 'DELETE',
-        headers: { apikey: EVOLUTION_API_KEY },
-      });
+      // 1. Logout/Delete from Evolution (ONLY if provider is Evolution)
+      if (targetInstance.provider === 'evolution') {
+        try {
+          await fetch(`${EVOLUTION_API_URL}/instance/logout/${targetInstance.instance_name}`, {
+            method: 'DELETE',
+            headers: { apikey: EVOLUTION_API_KEY },
+          });
 
-      await fetch(`${EVOLUTION_API_URL}/instance/delete/${instanceName}`, {
-        method: 'DELETE',
-        headers: { apikey: EVOLUTION_API_KEY },
-      });
+          await fetch(`${EVOLUTION_API_URL}/instance/delete/${targetInstance.instance_name}`, {
+            method: 'DELETE',
+            headers: { apikey: EVOLUTION_API_KEY },
+          });
+        } catch (e) {
+          console.error('Error logging out from Evolution:', e);
+        }
+      }
 
-      // 2. Remove from Supabase
-      await supabase
-        .from('system_config')
+      // 2. Remove from Instances Table
+      const { error } = await supabase
+        .from('instances')
         .delete()
-        .eq('key', 'evolution_instance_name');
+        .eq('instance_name', targetInstance.instance_name);
 
-      setInstanceName('');
-      setQrCode(null);
-      setConnectionStatus('disconnected');
+      if (error) throw error;
+
       toast.success('WhatsApp desconectado');
       fetchConfigs();
     } catch (error) {
@@ -1113,6 +1147,92 @@ Gostaria de agendar um horário conosco? 🤗"
     return configs.find((c) => c.key === key)?.value || '';
   };
 
+  /* Sincronização de Instâncias */
+  const syncWithEvolution = async () => {
+    setLoading(true);
+    try {
+      // 1. Fetch from Evolution
+      const response = await fetch(`${EVOLUTION_API_URL}/instance/fetchInstances`, {
+        headers: { apikey: EVOLUTION_API_KEY },
+      });
+
+      if (!response.ok) {
+        throw new Error('Falha ao buscar instâncias na Evolution API');
+      }
+
+      const evolutionInstances = await response.json();
+      console.log('Evolution Instances:', evolutionInstances);
+
+      /* 
+         Structure expected from Evolution v2 fetchInstances:
+         [
+           {
+             "instance": {
+               "instanceName": "name",
+               "status": "open",
+               "owner": "..."
+             }
+           },
+           ...
+         ]
+         OR Array of objects with instanceName directly.
+         Let's assume standard v2 structure.
+      */
+
+      const instancesList = Array.isArray(evolutionInstances) ? evolutionInstances : [];
+
+      let syncCount = 0;
+
+      for (const item of instancesList) {
+        // Evolution v2 usually returns objects with 'instance' or 'name'
+        const name = item.instance?.instanceName || item.instanceName || item.name;
+        const status = item.instance?.status || item.status; // 'open', 'close', etc.
+        const dbStatus = status === 'open' ? 'connected' : 'disconnected';
+
+        if (name) {
+          // Manual Check-Then-Write to avoid "ON CONFLICT" error (missing unique constraint)
+          const { data: existing } = await supabase
+            .from('instances')
+            .select('id')
+            .eq('instance_name', name)
+            .maybeSingle();
+
+          if (existing) {
+            // Update existing
+            const { error } = await supabase.from('instances').update({
+              status: dbStatus,
+              api_url: EVOLUTION_API_URL,
+              api_key: EVOLUTION_API_KEY,
+              updated_at: getSaoPauloTimestamp()
+            }).eq('id', existing.id);
+
+            if (!error) syncCount++;
+          } else {
+            // Insert new
+            const { error } = await supabase.from('instances').insert({
+              instance_name: name,
+              api_url: EVOLUTION_API_URL,
+              api_key: EVOLUTION_API_KEY,
+              status: dbStatus,
+              provider: 'evolution',
+            });
+
+            if (!error) syncCount++;
+          }
+        }
+      }
+
+      toast.success(`${syncCount} instâncias sincronizadas!`);
+      await fetchConfigs(); // Refresh list
+
+    } catch (error) {
+      console.error('Sync Error:', error);
+      toast.error('Erro ao sincronizar com Evolution');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto p-4 lg:p-8 space-y-6 pb-24 lg:pb-8">
       <div className="max-w-4xl space-y-6">
@@ -1146,76 +1266,68 @@ Gostaria de agendar um horário conosco? 🤗"
                   Gerencie a conexão da sua instância do WhatsApp
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Instance State Management */}
-                {!instanceName ? (
-                  <div className="flex flex-col items-center justify-center py-6 text-center space-y-4">
+              <CardContent className="space-y-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-sm font-medium text-muted-foreground">Instâncias Conectadas</h3>
+                  <Button onClick={() => setNewInstanceOpen(true)} size="sm">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Nova Instância
+                  </Button>
+                </div>
+
+                {instances.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-6 text-center space-y-4 border border-dashed rounded-lg">
                     <div className="p-3 rounded-full bg-muted">
                       <User className="h-8 w-8 text-muted-foreground" />
                     </div>
-                    <div className="space-y-1">
-                      <h3 className="font-medium">Nenhuma instância conectada</h3>
-                      <p className="text-sm text-muted-foreground">
-                        Crie uma nova instância para conectar seu WhatsApp
-                      </p>
-                    </div>
-                    <Button onClick={() => setNewInstanceOpen(true)}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Criar Novo WhatsApp
-                    </Button>
+                    <p className="text-sm text-muted-foreground">
+                      Nenhuma instância conectada
+                    </p>
                   </div>
                 ) : (
-                  <div className="space-y-6">
-                    {/* Status Display */}
-                    <div className="flex items-center justify-between p-4 border rounded-lg bg-background/50">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">Instância:</span>
-                          <Badge variant="outline">{instanceName}</Badge>
-                        </div>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          Status:
-                          <span className={cn(
-                            "font-medium",
-                            connectionStatus === 'connected' ? "text-success" : "text-amber-500"
-                          )}>
-                            {connectionStatus === 'connected' ? 'Ativo e Conectado' : 'Aguardando Conexão'}
-                          </span>
-                        </div>
-                      </div>
+                  <div className="grid gap-4">
+                    {instances.map((inst) => (
+                      <div key={inst.id} className="space-y-4 border rounded-lg p-4 bg-background/50">
+                        <div className="flex items-center justify-between">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{inst.instance_name}</span>
+                              <Badge variant="secondary">{inst.provider === 'meta' ? 'Meta API' : 'API WhatsApp'}</Badge>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              Status:
+                              <span className={cn(
+                                "font-medium",
+                                inst.status === 'connected' ? "text-success" : "text-amber-500"
+                              )}>
+                                {inst.status === 'connected' ? 'Ativo e Conectado' : 'Aguardando Conexão'}
+                              </span>
+                            </div>
+                          </div>
 
-                      {/* Action Buttons */}
-                      <div className="flex gap-2">
-                        {connectionStatus !== 'connected' && (
-                          <Button onClick={generateQRCode} disabled={connectionStatus === 'connecting'}>
-                            {connectionStatus === 'connecting' ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Gerando QR...
-                              </>
-                            ) : (
-                              <>
+                          <div className="flex gap-2">
+                            {inst.provider === 'evolution' && inst.status !== 'connected' && (
+                              <Button onClick={() => generateQRCode(inst)} size="sm" variant="outline">
                                 <QrCode className="mr-2 h-4 w-4" />
-                                Conectar (QR Code)
-                              </>
+                                Conectar
+                              </Button>
                             )}
-                          </Button>
-                        )}
-                        <Button variant="destructive" size="icon" onClick={handleDeleteInstance} title="Desconectar e Excluir">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
+                            <Button variant="destructive" size="icon" onClick={() => handleDeleteInstance(inst)} title="Desconectar">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
 
-                    {/* QR Code Display */}
-                    {qrCode && connectionStatus !== 'connected' && (
-                      <div className="flex flex-col items-center justify-center p-6 border rounded-lg bg-white w-fit mx-auto">
-                        <img src={qrCode} alt="QR Code WhatsApp" className="h-64 w-64" />
-                        <p className="mt-4 text-sm text-center text-gray-500">
-                          Abra o WhatsApp no seu celular → Configurações → Aparelhos Conectados → Conectar Aparelho
-                        </p>
+                        {inst.qr_code && inst.status !== 'connected' && (
+                          <div className="flex flex-col items-center justify-center p-4 border rounded bg-white w-fit mx-auto mt-4">
+                            <img src={inst.qr_code} alt="QR Code" className="h-48 w-48" />
+                            <p className="mt-2 text-xs text-center text-gray-500">
+                              Escaneie com seu WhatsApp
+                            </p>
+                          </div>
+                        )}
                       </div>
-                    )}
+                    ))}
                   </div>
                 )}
               </CardContent>
@@ -1229,15 +1341,67 @@ Gostaria de agendar um horário conosco? 🤗"
                     Digite um nome para identificar este WhatsApp (ex: Comercial, Suporte).
                   </DialogDescription>
                 </DialogHeader>
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label>Nome da Instância</Label>
+                <div className="grid gap-4 py-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="instanceName">Nome da Instância</Label>
                     <Input
-                      placeholder="Ex: Comercial"
+                      id="instanceName"
                       value={newInstanceName}
                       onChange={(e) => setNewInstanceName(e.target.value)}
+                      placeholder="Ex: PuraEmCasa"
                     />
                   </div>
+
+                  <div className="grid gap-2">
+                    <Label>Provedor</Label>
+                    <Select value={provider} onValueChange={(val: InstanceProvider) => setProvider(val)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione o provedor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="evolution">API WhatsApp (QRCode)</SelectItem>
+                        <SelectItem value="meta">Meta Cloud API (Oficial)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {provider === 'meta' && (
+                    <>
+                      <div className="grid gap-2">
+                        <Label htmlFor="metaBusinessId">Business Account ID (WABA)</Label>
+                        <Input
+                          id="metaBusinessId"
+                          value={metaBusinessId}
+                          onChange={(e) => setMetaBusinessId(e.target.value)}
+                          placeholder="Ex: 100582..."
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="metaPhoneId">Phone Number ID</Label>
+                        <Input
+                          id="metaPhoneId"
+                          value={metaPhoneId}
+                          onChange={(e) => setMetaPhoneId(e.target.value)}
+                          placeholder="Ex: 104521..."
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="metaToken">Permanent Access Token</Label>
+                        <Input
+                          id="metaToken"
+                          type="password"
+                          value={metaAccessToken}
+                          onChange={(e) => setMetaAccessToken(e.target.value)}
+                          placeholder="EAAL..."
+                        />
+                      </div>
+                      <div className="text-xs text-muted-foreground bg-secondary/30 p-2 rounded">
+                        <p className="font-semibold mb-1">Webhook Configuration:</p>
+                        <p>URL: <code>https://ragnzmmnqtogmodkfayj.supabase.co/functions/v1/meta-webhook</code></p>
+                        <p>Verify Token: <code>puraemcasa_verify_token</code></p>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setNewInstanceOpen(false)}>Cancelar</Button>
@@ -1248,555 +1412,567 @@ Gostaria de agendar um horário conosco? 🤗"
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+          </>
+        )}
 
-            {/* AI Settings */}
-            <Card className="border-border bg-card">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Brain className="h-5 w-5 text-primary" />
-                  Inteligência Artificial (Agente)
-                </CardTitle>
-                <CardDescription>
-                  Configure o comportamento e parâmetros do seu agente de IA
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-6 md:grid-cols-2">
-                  <div className="space-y-2 md:col-span-2">
-                    <Label>System Prompt (Personalidade)</Label>
-                    <Textarea
-                      value={aiSettings.system_prompt}
-                      onChange={(e) => setAiSettings(prev => ({ ...prev, system_prompt: e.target.value }))}
-                      placeholder="Você é um assistente..."
-                      rows={4}
-                      className="bg-secondary border-border"
-                    />
-                    <p className="text-xs text-muted-foreground">Define como a IA deve se comportar e o que ela sabe.</p>
-                  </div>
+        {/* AI Settings */}
+        {role === 'admin' && (
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Brain className="h-5 w-5 text-primary" />
+                Inteligência Artificial (Agente)
+              </CardTitle>
+              <CardDescription>
+                Configure o comportamento e parâmetros do seu agente de IA
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="space-y-2 md:col-span-2">
+                  <Label>System Prompt (Personalidade)</Label>
+                  <Textarea
+                    value={aiSettings.system_prompt}
+                    onChange={(e) => setAiSettings(prev => ({ ...prev, system_prompt: e.target.value }))}
+                    placeholder="Você é um assistente..."
+                    rows={4}
+                    className="bg-secondary border-border"
+                  />
+                  <p className="text-xs text-muted-foreground">Define como a IA deve se comportar e o que ela sabe.</p>
+                </div>
 
-                  {/* Model Selection Removed - Hardcoded to GPT-4o Mini in Backend */}
-                  {/* <div className="space-y-2">
+                {/* Model Selection Removed - Hardcoded to GPT-4o Mini in Backend */}
+                {/* <div className="space-y-2">
                     <Label>Modelo</Label>
                     <Select ... /> (Removed)
                   </div> */}
 
-                  <div className="space-y-2">
-                    <Label>Tempo de Espera (Debounce) - Segundos</Label>
-                    <Input
-                      type="number"
-                      value={(aiSettings as any).debounce_seconds || 6}
-                      onChange={(e) => setAiSettings(prev => ({ ...prev, debounce_seconds: Number(e.target.value) }))}
-                      className="bg-secondary border-border"
-                      min={1}
-                      max={60}
-                    />
-                    <p className="text-xs text-muted-foreground">Tempo que a IA espera por mais mensagens antes de responder.</p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Max Tokens ({aiSettings.max_tokens})</Label>
-                    <Input
-                      type="number"
-                      value={aiSettings.max_tokens}
-                      onChange={(e) => setAiSettings(prev => ({ ...prev, max_tokens: Number(e.target.value) }))}
-                      className="bg-secondary border-border"
-                      min={100}
-                      max={10000}
-                    />
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="flex justify-between">
-                      <Label>Temperature ({aiSettings.temperature})</Label>
-                    </div>
-                    <Slider
-                      value={[aiSettings.temperature]}
-                      onValueChange={([val]) => setAiSettings(prev => ({ ...prev, temperature: val }))}
-                      max={2}
-                      step={0.1}
-                      className="py-2"
-                    />
-                    <p className="text-xs text-muted-foreground">Criatividade vs Consistência</p>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="flex justify-between">
-                      <Label>Top P ({aiSettings.top_p})</Label>
-                    </div>
-                    <Slider
-                      value={[aiSettings.top_p]}
-                      onValueChange={([val]) => setAiSettings(prev => ({ ...prev, top_p: val }))}
-                      max={1}
-                      step={0.1}
-                      className="py-2"
-                    />
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="flex justify-between">
-                      <Label>Frequency Penalty ({aiSettings.frequency_penalty})</Label>
-                    </div>
-                    <Slider
-                      value={[aiSettings.frequency_penalty]}
-                      onValueChange={([val]) => setAiSettings(prev => ({ ...prev, frequency_penalty: val }))}
-                      max={2}
-                      step={0.1}
-                      className="py-2"
-                    />
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="flex justify-between">
-                      <Label>Presence Penalty ({aiSettings.presence_penalty})</Label>
-                    </div>
-                    <Slider
-                      value={[aiSettings.presence_penalty]}
-                      onValueChange={([val]) => setAiSettings(prev => ({ ...prev, presence_penalty: val }))}
-                      max={2}
-                      step={0.1}
-                      className="py-2"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-4">
-                  <Button onClick={handleSaveAi} disabled={savingAi} className="bg-primary hover:bg-primary/90">
-                    {savingAi ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Salvando...
-                      </>
-                    ) : (
-                      <>
-                        <Bot className="mr-2 h-4 w-4" />
-                        Salvar Configurações IA
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Alert Notification Config */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Phone className="h-5 w-5" />
-                  Alerta de Avisos
-                </CardTitle>
-                <CardDescription>
-                  Número de WhatsApp para receber resumo quando um lead for Agendado.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Número do WhatsApp (com DDD)</Label>
+                  <Label>Tempo de Espera (Debounce) - Segundos</Label>
                   <Input
-                    placeholder="Ex: 5511999999999"
-                    value={alertPhone}
-                    onChange={(e) => setAlertPhone(e.target.value)}
+                    type="number"
+                    value={(aiSettings as any).debounce_seconds || 6}
+                    onChange={(e) => setAiSettings(prev => ({ ...prev, debounce_seconds: Number(e.target.value) }))}
+                    className="bg-secondary border-border"
+                    min={1}
+                    max={60}
                   />
-                  <p className="text-sm text-muted-foreground">
-                    Se preenchido, enviaremos um resumo (Nome, Telefone, Orçamento, Resumo da conversa) para este número.
-                  </p>
+                  <p className="text-xs text-muted-foreground">Tempo que a IA espera por mais mensagens antes de responder.</p>
                 </div>
-                <Button onClick={saveConfigs}>Salvar Configuração</Button>
-              </CardContent>
-            </Card>
 
-            {/* Knowledge Base (RAG) */}
-            <KnowledgeBase />
+                <div className="space-y-2">
+                  <Label>Max Tokens ({aiSettings.max_tokens})</Label>
+                  <Input
+                    type="number"
+                    value={aiSettings.max_tokens}
+                    onChange={(e) => setAiSettings(prev => ({ ...prev, max_tokens: Number(e.target.value) }))}
+                    className="bg-secondary border-border"
+                    min={100}
+                    max={10000}
+                  />
+                </div>
 
-            {/* Message Shortcuts */}
-            <Collapsible open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
-              <Card className="border-border bg-card">
-                <CollapsibleTrigger asChild>
-                  <CardHeader className="cursor-pointer hover:bg-secondary/50 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle className="flex items-center gap-2">
-                          <Command className="h-5 w-5" />
-                          Atalhos de Mensagem
-                        </CardTitle>
-                        <CardDescription>Crie atalhos para mensagens frequentes (use / no chat)</CardDescription>
-                      </div>
-                      <ChevronDown
-                        className={cn(
-                          'h-5 w-5 text-muted-foreground transition-transform',
-                          shortcutsOpen && 'rotate-180'
-                        )}
-                      />
-                    </div>
-                  </CardHeader>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <CardContent className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <p className="text-sm text-muted-foreground">
-                        {shortcuts.length} atalho{shortcuts.length !== 1 ? 's' : ''} cadastrado{shortcuts.length !== 1 ? 's' : ''}
-                      </p>
-                      <Dialog open={newShortcutOpen} onOpenChange={(open) => {
-                        setNewShortcutOpen(open);
-                        if (!open) {
-                          setEditingShortcut(null);
-                          setNewShortcutTrigger('');
-                          setNewShortcutContent('');
-                        }
-                      }}>
-                        <DialogTrigger asChild>
-                          <Button className="bg-primary hover:bg-primary/90">
-                            <Plus className="mr-2 h-4 w-4" />
-                            Novo Atalho
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="bg-card border-border">
-                          <DialogHeader>
-                            <DialogTitle>{editingShortcut ? 'Editar Atalho' : 'Novo Atalho'}</DialogTitle>
-                            <DialogDescription>
-                              Crie um atalho para usar digitando / no chat
-                            </DialogDescription>
-                          </DialogHeader>
-                          <div className="space-y-4 py-4">
-                            <div className="space-y-2">
-                              <Label>Gatilho (sem /)</Label>
-                              <Input
-                                value={newShortcutTrigger}
-                                onChange={(e) => setNewShortcutTrigger(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                                placeholder="saudacao"
-                                className="bg-secondary border-border"
-                              />
-                              <p className="text-xs text-muted-foreground">
-                                Apenas letras minúsculas, números e underscore
-                              </p>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Conteúdo da mensagem</Label>
-                              <Textarea
-                                value={newShortcutContent}
-                                onChange={(e) => setNewShortcutContent(e.target.value)}
-                                placeholder="Olá! Seja bem-vindo à Pura Em Casa. Como posso ajudá-lo?"
-                                rows={4}
-                                className="bg-secondary border-border"
-                              />
-                            </div>
-                          </div>
-                          <DialogFooter>
-                            <Button variant="outline" onClick={() => setNewShortcutOpen(false)}>
-                              Cancelar
-                            </Button>
-                            <Button onClick={handleSaveShortcut} disabled={savingShortcut} className="bg-primary hover:bg-primary/90">
-                              {savingShortcut ? (
-                                <>
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  Salvando...
-                                </>
-                              ) : (
-                                'Salvar'
-                              )}
-                            </Button>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
-                    </div>
+                <div className="space-y-4">
+                  <div className="flex justify-between">
+                    <Label>Temperature ({aiSettings.temperature})</Label>
+                  </div>
+                  <Slider
+                    value={[aiSettings.temperature]}
+                    onValueChange={([val]) => setAiSettings(prev => ({ ...prev, temperature: val }))}
+                    max={2}
+                    step={0.1}
+                    className="py-2"
+                  />
+                  <p className="text-xs text-muted-foreground">Criatividade vs Consistência</p>
+                </div>
 
-                    {shortcuts.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <Command className="h-10 w-10 mx-auto mb-2 opacity-50" />
-                        <p>Nenhum atalho cadastrado</p>
-                        <p className="text-sm">Crie atalhos para agilizar o atendimento</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {shortcuts.map((shortcut) => (
-                          <div
-                            key={shortcut.id}
-                            className="flex items-start justify-between p-4 rounded-lg border border-border bg-secondary/30"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <Badge variant="secondary" className="font-mono">
-                                  /{shortcut.trigger}
-                                </Badge>
-                              </div>
-                              <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
-                                {shortcut.content}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-1 ml-4 shrink-0">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleEditShortcut(shortcut)}
-                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeleteShortcut(shortcut.id)}
-                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </CollapsibleContent>
-              </Card>
-            </Collapsible>
+                <div className="space-y-4">
+                  <div className="flex justify-between">
+                    <Label>Top P ({aiSettings.top_p})</Label>
+                  </div>
+                  <Slider
+                    value={[aiSettings.top_p]}
+                    onValueChange={([val]) => setAiSettings(prev => ({ ...prev, top_p: val }))}
+                    max={1}
+                    step={0.1}
+                    className="py-2"
+                  />
+                </div>
 
-            {/* Users Management */}
-            {/* Users Management */}
-            <Card className="border-border bg-card">
-              <CardHeader>
+                <div className="space-y-4">
+                  <div className="flex justify-between">
+                    <Label>Frequency Penalty ({aiSettings.frequency_penalty})</Label>
+                  </div>
+                  <Slider
+                    value={[aiSettings.frequency_penalty]}
+                    onValueChange={([val]) => setAiSettings(prev => ({ ...prev, frequency_penalty: val }))}
+                    max={2}
+                    step={0.1}
+                    className="py-2"
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex justify-between">
+                    <Label>Presence Penalty ({aiSettings.presence_penalty})</Label>
+                  </div>
+                  <Slider
+                    value={[aiSettings.presence_penalty]}
+                    onValueChange={([val]) => setAiSettings(prev => ({ ...prev, presence_penalty: val }))}
+                    max={2}
+                    step={0.1}
+                    className="py-2"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-4">
+                <Button onClick={handleSaveAi} disabled={savingAi} className="bg-primary hover:bg-primary/90">
+                  {savingAi ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    <>
+                      <Bot className="mr-2 h-4 w-4" />
+                      Salvar Configurações IA
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Alert Notification Config */}
+        {role === 'admin' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Phone className="h-5 w-5" />
+                Alerta de Avisos
+              </CardTitle>
+              <CardDescription>
+                Número de WhatsApp para receber resumo quando um lead for Agendado.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>Número do WhatsApp (com DDD)</Label>
+                <Input
+                  placeholder="Ex: 5511999999999"
+                  value={alertPhone}
+                  onChange={(e) => setAlertPhone(e.target.value)}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Se preenchido, enviaremos um resumo (Nome, Telefone, Orçamento, Resumo da conversa) para este número.
+                </p>
+              </div>
+              <Button onClick={saveConfigs}>Salvar Configuração</Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Knowledge Base (RAG) */}
+        {role === 'admin' && <KnowledgeBase />}
+
+        {/* Message Shortcuts */}
+        <Collapsible open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="cursor-pointer hover:bg-secondary/50 transition-colors">
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="flex items-center gap-2">
-                      <Users className="h-5 w-5" />
-                      Gerenciar Usuários
+                      <Command className="h-5 w-5" />
+                      Atalhos de Mensagem
                     </CardTitle>
-                    <CardDescription>Adicione e gerencie usuários do sistema (Admins têm acesso total)</CardDescription>
+                    <CardDescription>Crie atalhos para mensagens frequentes (use / no chat)</CardDescription>
                   </div>
-                  <Dialog open={newUserOpen} onOpenChange={setNewUserOpen}>
+                  <ChevronDown
+                    className={cn(
+                      'h-5 w-5 text-muted-foreground transition-transform',
+                      shortcutsOpen && 'rotate-180'
+                    )}
+                  />
+                </div>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <p className="text-sm text-muted-foreground">
+                    {shortcuts.length} atalho{shortcuts.length !== 1 ? 's' : ''} cadastrado{shortcuts.length !== 1 ? 's' : ''}
+                  </p>
+                  <Dialog open={newShortcutOpen} onOpenChange={(open) => {
+                    setNewShortcutOpen(open);
+                    if (!open) {
+                      setEditingShortcut(null);
+                      setNewShortcutTrigger('');
+                      setNewShortcutContent('');
+                    }
+                  }}>
                     <DialogTrigger asChild>
                       <Button className="bg-primary hover:bg-primary/90">
                         <Plus className="mr-2 h-4 w-4" />
-                        Adicionar
+                        Novo Atalho
                       </Button>
                     </DialogTrigger>
                     <DialogContent className="bg-card border-border">
                       <DialogHeader>
-                        <DialogTitle>Novo Usuário</DialogTitle>
+                        <DialogTitle>{editingShortcut ? 'Editar Atalho' : 'Novo Atalho'}</DialogTitle>
                         <DialogDescription>
-                          Preencha os dados para criar um novo usuário.
-                          <br />
-                          <span className="text-xs text-muted-foreground">Nota: Requer Edge Function 'create-user' implantada.</span>
+                          Crie um atalho para usar digitando / no chat
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                          <Label>Nome</Label>
+                          <Label>Gatilho (sem /)</Label>
                           <Input
-                            value={newUserName}
-                            onChange={(e) => setNewUserName(e.target.value)}
-                            placeholder="Nome completo"
+                            value={newShortcutTrigger}
+                            onChange={(e) => setNewShortcutTrigger(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                            placeholder="saudacao"
                             className="bg-secondary border-border"
                           />
+                          <p className="text-xs text-muted-foreground">
+                            Apenas letras minúsculas, números e underscore
+                          </p>
                         </div>
                         <div className="space-y-2">
-                          <Label>Email</Label>
-                          <Input
-                            type="email"
-                            value={newUserEmail}
-                            onChange={(e) => setNewUserEmail(e.target.value)}
-                            placeholder="email@exemplo.com"
+                          <Label>Conteúdo da mensagem</Label>
+                          <Textarea
+                            value={newShortcutContent}
+                            onChange={(e) => setNewShortcutContent(e.target.value)}
+                            placeholder="Olá! Seja bem-vindo à Pura Em Casa. Como posso ajudá-lo?"
+                            rows={4}
                             className="bg-secondary border-border"
                           />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Senha</Label>
-                          <Input
-                            type="password"
-                            value={newUserPassword}
-                            onChange={(e) => setNewUserPassword(e.target.value)}
-                            placeholder="Mínimo 6 caracteres"
-                            className="bg-secondary border-border"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Função (Role)</Label>
-                          <Select value={newUserRole} onValueChange={(v) => setNewUserRole(v as UserRole)}>
-                            <SelectTrigger className="bg-secondary border-border">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="bg-popover border-border">
-                              <SelectItem value="user">Usuário Padrão</SelectItem>
-                              <SelectItem value="admin">Administrador</SelectItem>
-                            </SelectContent>
-                          </Select>
                         </div>
                       </div>
                       <DialogFooter>
-                        <Button variant="outline" onClick={() => setNewUserOpen(false)}>
+                        <Button variant="outline" onClick={() => setNewShortcutOpen(false)}>
                           Cancelar
                         </Button>
-                        <Button onClick={handleCreateUser} disabled={creatingUser} className="bg-primary hover:bg-primary/90">
-                          {creatingUser ? (
+                        <Button onClick={handleSaveShortcut} disabled={savingShortcut} className="bg-primary hover:bg-primary/90">
+                          {savingShortcut ? (
                             <>
                               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Criando...
+                              Salvando...
                             </>
                           ) : (
-                            'Criar Usuário'
+                            'Salvar'
                           )}
                         </Button>
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
                 </div>
-              </CardHeader>
-              <CardContent>
-                {loading ? (
-                  <div className="space-y-4">
-                    {[...Array(3)].map((_, i) => (
-                      <div key={i} className="flex items-center gap-4">
-                        <Skeleton className="h-10 w-10 rounded-full" />
-                        <div className="flex-1">
-                          <Skeleton className="h-4 w-32 mb-2" />
-                          <Skeleton className="h-3 w-48" />
+
+                {shortcuts.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Command className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                    <p>Nenhum atalho cadastrado</p>
+                    <p className="text-sm">Crie atalhos para agilizar o atendimento</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {shortcuts.map((shortcut) => (
+                      <div
+                        key={shortcut.id}
+                        className="flex items-start justify-between p-4 rounded-lg border border-border bg-secondary/30"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary" className="font-mono">
+                              /{shortcut.trigger}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
+                            {shortcut.content}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 ml-4 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleEditShortcut(shortcut)}
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeleteShortcut(shortcut.id)}
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {users.length === 0 ? (
-                      <p className="text-muted-foreground text-center py-4">Nenhum usuário encontrado (exceto você).</p>
-                    ) : (
-                      users.map((user) => (
-                        <div
-                          key={user.id}
-                          className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/30"
-                        >
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-10 w-10 bg-primary">
-                              <AvatarFallback className="text-primary-foreground">
-                                {getInitials(user.name || user.email)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="flex-1">
-                              <p className="font-medium text-foreground">{user.name || 'Sem nome'}</p>
-                              <p className="text-sm text-muted-foreground">{user.email}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                              {user.role === 'admin' ? 'Admin' : 'Usuário'}
-                            </Badge>
-
-                            {/* Actions only valid if not self (usually) but let's allow editing roles */}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              title={user.role === 'admin' ? 'Rebaixar para Usuário' : 'Promover a Admin'}
-                              onClick={() => handleToggleRole(user.id, user.role)}
-                              disabled={user.id === userData?.id} // Prevent self-demotion lockout if desired, or allow it
-                            >
-                              <Key className="h-4 w-4" />
-                            </Button>
-
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              title="Excluir Usuário"
-                              onClick={() => handleDeleteUser(user.id)}
-                              disabled={user.id === userData?.id} // Prevent self-deletion
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
                 )}
               </CardContent>
-            </Card>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
 
-            {/* Lead Distribution */}
-            <Card className="border-border bg-card">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Users className="h-5 w-5" />
-                  Distribuição Automática de Leads
-                </CardTitle>
-                <CardDescription>
-                  Distribui novos leads automaticamente de forma igualitária entre os usuários selecionados
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/30">
-                  <div>
-                    <Label className="text-base font-medium">Ativar distribuição automática</Label>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Novos leads serão distribuídos automaticamente (round-robin)
-                    </p>
-                  </div>
-                  <Switch
-                    checked={leadDistributionEnabled}
-                    onCheckedChange={handleToggleDistribution}
-                  />
-                </div>
 
-                <div className="space-y-3">
-                  <Label>Usuários na Distribuição</Label>
-
-                  {distributionUsers.length === 0 ? (
-                    <p className="text-sm text-muted-foreground p-4 text-center border border-dashed rounded-lg">
-                      Nenhum usuário na distribuição. Adicione usuários abaixo.
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {distributionUsers.map((du, index) => (
-                        <div
-                          key={du.id}
-                          className="flex items-center justify-between p-3 rounded-lg border border-border bg-secondary/30"
-                        >
-                          <div className="flex items-center gap-3">
-                            <Badge variant="outline" className="font-mono w-8 justify-center">
-                              {index + 1}
-                            </Badge>
-                            <div>
-                              <p className="font-medium">{du.users?.name || 'Usuário desconhecido'}</p>
-                              <p className="text-sm text-muted-foreground">{du.users?.email}</p>
-                            </div>
+        {/* Admin-only sections */}
+        {
+          (role === 'admin' || role === 'master') && (
+            <>
+              {/* Users Management */}
+              {/* Users Management */}
+              <Card className="border-border bg-card">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <Users className="h-5 w-5" />
+                        Gerenciar Usuários
+                      </CardTitle>
+                      <CardDescription>Adicione e gerencie usuários do sistema (Admins têm acesso total)</CardDescription>
+                    </div>
+                    <Dialog open={newUserOpen} onOpenChange={setNewUserOpen}>
+                      <DialogTrigger asChild>
+                        <Button className="bg-primary hover:bg-primary/90">
+                          <Plus className="mr-2 h-4 w-4" />
+                          Adicionar
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="bg-card border-border">
+                        <DialogHeader>
+                          <DialogTitle>Novo Usuário</DialogTitle>
+                          <DialogDescription>
+                            Preencha os dados para criar um novo usuário.
+                            <br />
+                            <span className="text-xs text-muted-foreground">Nota: Requer Edge Function 'create-user' implantada.</span>
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                          <div className="space-y-2">
+                            <Label>Nome</Label>
+                            <Input
+                              value={newUserName}
+                              onChange={(e) => setNewUserName(e.target.value)}
+                              placeholder="Nome completo"
+                              className="bg-secondary border-border"
+                            />
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleRemoveFromDistribution(du.id)}
-                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Remover
+                          <div className="space-y-2">
+                            <Label>Email</Label>
+                            <Input
+                              type="email"
+                              value={newUserEmail}
+                              onChange={(e) => setNewUserEmail(e.target.value)}
+                              placeholder="email@exemplo.com"
+                              className="bg-secondary border-border"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Senha</Label>
+                            <Input
+                              type="password"
+                              value={newUserPassword}
+                              onChange={(e) => setNewUserPassword(e.target.value)}
+                              placeholder="Mínimo 6 caracteres"
+                              className="bg-secondary border-border"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Função (Role)</Label>
+                            <Select value={newUserRole} onValueChange={(v) => setNewUserRole(v as UserRole)}>
+                              <SelectTrigger className="bg-secondary border-border">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-popover border-border">
+                                <SelectItem value="user">Usuário Padrão</SelectItem>
+                                <SelectItem value="admin">Administrador</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setNewUserOpen(false)}>
+                            Cancelar
                           </Button>
+                          <Button onClick={handleCreateUser} disabled={creatingUser} className="bg-primary hover:bg-primary/90">
+                            {creatingUser ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Criando...
+                              </>
+                            ) : (
+                              'Criar Usuário'
+                            )}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {loading ? (
+                    <div className="space-y-4">
+                      {[...Array(3)].map((_, i) => (
+                        <div key={i} className="flex items-center gap-4">
+                          <Skeleton className="h-10 w-10 rounded-full" />
+                          <div className="flex-1">
+                            <Skeleton className="h-4 w-32 mb-2" />
+                            <Skeleton className="h-3 w-48" />
+                          </div>
                         </div>
                       ))}
                     </div>
-                  )}
+                  ) : (
+                    <div className="space-y-3">
+                      {users.length === 0 ? (
+                        <p className="text-muted-foreground text-center py-4">Nenhum usuário encontrado (exceto você).</p>
+                      ) : (
+                        users.map((user) => (
+                          <div
+                            key={user.id}
+                            className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/30"
+                          >
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-10 w-10 bg-primary">
+                                <AvatarFallback className="text-primary-foreground">
+                                  {getInitials(user.name || user.email)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1">
+                                <p className="font-medium text-foreground">{user.name || 'Sem nome'}</p>
+                                <p className="text-sm text-muted-foreground">{user.email}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
+                                {user.role === 'admin' ? 'Admin' : 'Usuário'}
+                              </Badge>
 
-                  <div className="pt-2">
-                    <Label className="mb-2 block">Adicionar Usuário</Label>
-                    <Select onValueChange={handleAddToDistribution}>
-                      <SelectTrigger className="bg-secondary border-border">
-                        <SelectValue placeholder="Selecione um usuário para adicionar" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {users
-                          .filter(u => !distributionUsers.some(du => du.user_id === u.id))
-                          .map(u => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.name} ({u.email})
-                            </SelectItem>
-                          ))
-                        }
-                        {users.filter(u => !distributionUsers.some(du => du.user_id === u.id)).length === 0 && (
-                          <SelectItem value="_none" disabled>
-                            Todos os usuários já estão na distribuição
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
+                              {/* Actions only valid if not self (usually) but let's allow editing roles */}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                title={user.role === 'admin' ? 'Rebaixar para Usuário' : 'Promover a Admin'}
+                                onClick={() => handleToggleRole(user.id, user.role)}
+                                disabled={user.id === userData?.id} // Prevent self-demotion lockout if desired, or allow it
+                              >
+                                <Key className="h-4 w-4" />
+                              </Button>
+
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                title="Excluir Usuário"
+                                onClick={() => handleDeleteUser(user.id)}
+                                disabled={user.id === userData?.id} // Prevent self-deletion
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Lead Distribution */}
+              <Card className="border-border bg-card">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Users className="h-5 w-5" />
+                    Distribuição Automática de Leads
+                  </CardTitle>
+                  <CardDescription>
+                    Distribui novos leads automaticamente de forma igualitária entre os usuários selecionados
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/30">
+                    <div>
+                      <Label className="text-base font-medium">Ativar distribuição automática</Label>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Novos leads serão distribuídos automaticamente (round-robin)
+                      </p>
+                    </div>
+                    <Switch
+                      checked={leadDistributionEnabled}
+                      onCheckedChange={handleToggleDistribution}
+                    />
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
+
+                  <div className="space-y-3">
+                    <Label>Usuários na Distribuição</Label>
+
+                    {distributionUsers.length === 0 ? (
+                      <p className="text-sm text-muted-foreground p-4 text-center border border-dashed rounded-lg">
+                        Nenhum usuário na distribuição. Adicione usuários abaixo.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {distributionUsers.map((du, index) => (
+                          <div
+                            key={du.id}
+                            className="flex items-center justify-between p-3 rounded-lg border border-border bg-secondary/30"
+                          >
+                            <div className="flex items-center gap-3">
+                              <Badge variant="outline" className="font-mono w-8 justify-center">
+                                {index + 1}
+                              </Badge>
+                              <div>
+                                <p className="font-medium">{du.users?.name || 'Usuário desconhecido'}</p>
+                                <p className="text-sm text-muted-foreground">{du.users?.email}</p>
+                              </div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemoveFromDistribution(du.id)}
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Remover
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="pt-2">
+                      <Label className="mb-2 block">Adicionar Usuário</Label>
+                      <Select onValueChange={handleAddToDistribution}>
+                        <SelectTrigger className="bg-secondary border-border">
+                          <SelectValue placeholder="Selecione um usuário para adicionar" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {users
+                            .filter(u => !distributionUsers.some(du => du.user_id === u.id))
+                            .map(u => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.name} ({u.email})
+                              </SelectItem>
+                            ))
+                          }
+                          {users.filter(u => !distributionUsers.some(du => du.user_id === u.id)).length === 0 && (
+                            <SelectItem value="_none" disabled>
+                              Todos os usuários já estão na distribuição
+                            </SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )
+        }
 
         {/* My Profile */}
         <Card className="border-border bg-card">
@@ -1918,7 +2094,7 @@ Gostaria de agendar um horário conosco? 🤗"
             </div>
           </CardContent>
         </Card>
-      </div>
+      </div >
     </div >
   );
 }

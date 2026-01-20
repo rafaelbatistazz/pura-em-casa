@@ -154,7 +154,7 @@ function SortableLeadCard({ lead, onEdit }: SortableLeadCardProps) {
 }
 
 function LeadCard({ lead, onEdit }: { lead: LeadWithUser; onEdit: (lead: LeadWithUser) => void }) {
-  const { role } = useAuth();
+  const { user, role } = useAuth();
 
   const getAvatarColor = (name: string) => {
     const index = name.charCodeAt(0) % avatarColors.length;
@@ -184,7 +184,20 @@ function LeadCard({ lead, onEdit }: { lead: LeadWithUser; onEdit: (lead: LeadWit
     // Remove WhatsApp suffix if present
     const cleanRaw = phone.split('@')[0];
 
-    if (role !== 'admin') {
+    const isAssignedToMe = user && lead.assigned_to === user.id;
+
+    // DEBUG LOG
+    if (lead.assigned_to) {
+      console.log('Lead Debug:', {
+        leadName: lead.name,
+        assignedTo: lead.assigned_to,
+        myId: user?.id,
+        isMatch: isAssignedToMe,
+        role: role
+      });
+    }
+
+    if (role !== 'admin' && !isAssignedToMe) {
       return maskPhone(cleanRaw);
     }
 
@@ -366,10 +379,11 @@ export default function Kanban() {
   }, [role, user]);
 
   const fetchUsers = useCallback(async () => {
-    if (role !== 'admin') return;
+    // Permitir que todos carreguem usuários para mapear os nomes nos cards
+    // O RLS da tabela app_profiles controla quem vê o quê (geralmente todos veem nomes)
     const { data } = await supabase.from('app_profiles').select('*');
     if (data) setUsers(data as UserType[]);
-  }, [role]);
+  }, []);
 
 
 

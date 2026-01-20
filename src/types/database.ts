@@ -31,7 +31,7 @@ export interface Lead {
   utm_term?: string | null;
   utm_content?: string | null;
   users?: User;
-  budget?: number | null;
+  instance_name?: string | null;
 }
 
 export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'sticker' | null;
@@ -49,6 +49,8 @@ export interface Message {
   read: boolean;
 }
 
+export type InstanceProvider = 'evolution' | 'meta';
+
 export interface Instance {
   id: string;
   instance_name: string;
@@ -57,6 +59,22 @@ export interface Instance {
   qr_code: string | null;
   status: InstanceStatus;
   last_connected: string | null;
+  provider: InstanceProvider;
+  meta_business_id?: string | null;
+  meta_phone_id?: string | null;
+  meta_access_token?: string | null;
+}
+
+export interface WhatsAppTemplate {
+  id: string;
+  meta_id: string;
+  name: string;
+  status: 'APPROVED' | 'REJECTED' | 'PENDING' | 'PAUSED' | 'DISABLED';
+  language: string;
+  category: string;
+  components: any; // JSONB
+  last_synced_at: string;
+  created_at: string;
 }
 
 export interface SystemConfig {
@@ -65,6 +83,7 @@ export interface SystemConfig {
   value: string;
   created_at: string;
 }
+
 
 export interface MessageShortcut {
   id: string;
@@ -129,6 +148,7 @@ export interface Database {
           utm_term?: string | null;
           utm_content?: string | null;
           budget?: number | null;
+          instance_name?: string | null;
         };
         Update: {
           phone?: string;
@@ -146,6 +166,7 @@ export interface Database {
           utm_term?: string | null;
           utm_content?: string | null;
           budget?: number | null;
+          instance_name?: string | null;
         };
       };
       messages: {
@@ -201,7 +222,25 @@ export interface Database {
           value?: string;
         };
       };
+      whatsapp_templates: {
+        Row: WhatsAppTemplate;
+        Insert: {
+          meta_id: string;
+          name: string;
+          status: string;
+          language?: string;
+          category?: string;
+          components?: any;
+          last_synced_at?: string;
+        };
+        Update: {
+          status?: string;
+          components?: any;
+          last_synced_at?: string;
+        };
+      };
       message_shortcuts: {
+
         Row: MessageShortcut;
         Insert: {
           trigger: string;

@@ -17,6 +17,8 @@ import Conversas from "./pages/Conversas";
 import Kanban from "./pages/Kanban";
 import Config from "./pages/Config";
 import NotFound from "./pages/NotFound";
+import Templates from "./pages/Templates";
+
 
 const queryClient = new QueryClient();
 
@@ -29,7 +31,13 @@ const App = () => {
       <AuthProvider>
         <TooltipProvider>
           <Toaster />
-          <Sonner position="top-right" />
+          <Sonner
+            position="top-right"
+            itemGap={10}
+            duration={3000}
+            closeButton
+            richColors
+          />
           <BrowserRouter>
             <Routes>
               {/* Public routes */}
@@ -57,6 +65,7 @@ const App = () => {
                 <Route path="/conversas" element={<Conversas />} />
                 <Route path="/kanban" element={<Kanban />} />
                 <Route path="/config" element={<Config />} />
+                <Route path="/templates" element={<Templates />} />
               </Route>
 
               {/* Redirects */}

@@ -29,8 +29,11 @@ import {
     Clock
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Lead, User, LeadStatus } from '@/types/database';
+import { maskPhone, normalizePhone } from '@/lib/phoneUtils';
+import type { Lead, User, LeadStatus, Instance } from '@/types/database';
+import { supabase } from '@/lib/supabase';
 import { statusColors, statusLabels, getInitials, avatarColors } from '@/pages/Conversas'; // We'll need to export these from Conversas or move to utils
+import { useAuth } from '@/contexts/AuthContext';
 
 // For simplicity, we might need these props
 interface ClientDetailsSheetProps {
@@ -72,8 +75,11 @@ export function ClientDetailsSheet({
     const [assignedTo, setAssignedTo] = useState<string>('none');
     const [cleaningDate, setCleaningDate] = useState<Date | undefined>(undefined);
     const [budget, setBudget] = useState<string>('');
+    const [instanceName, setInstanceName] = useState<string>('default');
+    const [instances, setInstances] = useState<Instance[]>([]);
 
     const [loading, setLoading] = useState(false);
+    const { user } = useAuth();
 
     // Confirmation State
     const [confirmOpen, setConfirmOpen] = useState(false);
@@ -82,21 +88,34 @@ export function ClientDetailsSheet({
     useEffect(() => {
         if (lead && isOpen) {
             setName(lead.name);
-            const rawPhone = lead.phone.replace('@s.whatsapp.net', '');
-            const formatted = rawPhone.replace(/^(\d{2})(\d{2})(\d{5})(\d{4}).*/, '+$1 ($2) $3-$4').replace(/^(\d{2})(\d{5})(\d{4}).*/, '($1) $2-$3'); // Simple mask attempt, usually 55+
-            // Better: remove 55 if present, then mask
-            const clean = rawPhone.startsWith('55') ? rawPhone.slice(2) : rawPhone;
-            const mask = clean.replace(/^(\d{2})(\d{5})(\d{4}).*/, '($1) $2-$3');
-            setPhone(mask);
+
+            // Should Unmask?
+            // User can unmask if:
+            // 1. Role is admin
+            // 2. Lead is assigned to them
+            const isAssignedToMe = lead.assigned_to === user?.id;
+            const shouldUnmask = role === 'admin' || isAssignedToMe;
+
+            setPhone(shouldUnmask ? normalizePhone(lead.phone) : maskPhone(lead.phone));
+
             setNotes(lead.notes || '');
             setStatus(lead.status);
             setAssignedTo(lead.assigned_to || 'none');
             setCleaningDate(lead.cleaning_date ? new Date(lead.cleaning_date) : undefined);
-            setBudget(lead.budget ? String(lead.budget) : '');
+            setBudget(lead.budget ? lead.budget.toString() : '');
+            setInstanceName(lead.instance_name || 'default');
         }
-    }, [lead, isOpen]);
+    }, [lead, isOpen, user, role]);
 
-    if (!lead) return null;
+    useEffect(() => {
+        if (isOpen && role === 'admin') {
+            const fetchInstances = async () => {
+                const { data } = await supabase.from('instances').select('*').eq('status', 'connected');
+                if (data) setInstances(data as Instance[]);
+            };
+            fetchInstances();
+        }
+    }, [isOpen, role]);
 
     const handleSave = async () => {
         setLoading(true);
@@ -114,12 +133,16 @@ export function ClientDetailsSheet({
             await onUpdateLead({
                 name,
                 phone: phoneToSave,
-                notes: notes || null,
                 status,
                 assigned_to: assignedTo === 'none' ? null : assignedTo,
                 cleaning_date: cleaningDate ? cleaningDate.toISOString() : null,
-                budget: budgetValue
+                budget: budgetValue,
+                notes,
+                instance_name: instanceName === 'default' ? null : instanceName
             });
+            onClose();
+        } catch (error) {
+            console.error(error);
         } finally {
             setLoading(false);
         }
@@ -145,20 +168,46 @@ export function ClientDetailsSheet({
         return avatarColors[index];
     };
 
+    if (!lead) return null;
+
     return (
         <>
             <Sheet open={isOpen} onOpenChange={onClose}>
-                <SheetContent className="w-full sm:max-w-md overflow-y-auto">
-                    <SheetHeader className="mb-6">
-                        <SheetTitle>Detalhes do Cliente</SheetTitle>
-                        <SheetDescription>Gerencie as informações e status deste lead.</SheetDescription>
+                <SheetContent className="w-full sm:max-w-md overflow-y-auto bg-gradient-to-b from-background to-muted/20">
+                    {/* Custom Close Button */}
+                    <button
+                        onClick={onClose}
+                        className="absolute right-4 top-4 rounded-full p-2 opacity-70 ring-offset-background transition-all hover:opacity-100 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground z-50"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                        >
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                        <span className="sr-only">Fechar</span>
+                    </button>
+
+                    <SheetHeader className="mb-8 pr-12">
+                        <SheetTitle className="text-2xl font-semibold">Detalhes do Cliente</SheetTitle>
+                        <SheetDescription className="text-sm text-muted-foreground">
+                            Gerencie as informações e status deste lead.
+                        </SheetDescription>
                     </SheetHeader>
 
-                    <div className="space-y-6">
+                    <div className="space-y-6 pb-6">
                         {/* Profile Section */}
-                        <div className="flex flex-col items-center justify-center gap-3 mb-6">
-                            <Avatar className={cn('h-24 w-24', getAvatarColor(lead.name))}>
-                                <AvatarFallback className="text-2xl text-white">
+                        <div className="flex flex-col items-center justify-center gap-4 pb-6 border-b">
+                            <Avatar className={cn('h-20 w-20 ring-4 ring-background shadow-lg', getAvatarColor(lead.name))}>
+                                <AvatarFallback className="text-2xl font-semibold text-white">
                                     {getInitials(lead.name)}
                                 </AvatarFallback>
                             </Avatar>
@@ -166,22 +215,24 @@ export function ClientDetailsSheet({
                                 <Input
                                     value={name}
                                     onChange={(e) => setName(e.target.value)}
-                                    className="text-center font-medium text-lg border-transparent hover:border-border focus:border-primary transition-colors h-10"
+                                    className="text-center font-semibold text-lg border-0 bg-transparent hover:bg-accent/50 focus:bg-accent transition-colors h-10 px-3 rounded-lg"
+                                    placeholder="Nome do cliente"
                                 />
                                 <Input
                                     value={phone}
                                     onChange={(e) => setPhone(e.target.value)}
-                                    className="text-center text-muted-foreground text-sm border-transparent hover:border-border focus:border-primary transition-colors h-8"
+                                    className="text-center text-muted-foreground text-sm border-0 bg-transparent hover:bg-accent/50 focus:bg-accent transition-colors h-9 px-3 rounded-lg"
+                                    placeholder="Telefone"
                                 />
                             </div>
                         </div>
 
                         {/* Status & Assignment */}
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-2">
-                                <Label>Status</Label>
+                                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</Label>
                                 <Select value={status} onValueChange={(v) => setStatus(v as LeadStatus)}>
-                                    <SelectTrigger>
+                                    <SelectTrigger className="h-11 bg-card hover:bg-accent/50 transition-colors">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -198,10 +249,10 @@ export function ClientDetailsSheet({
                             </div>
 
                             <div className="space-y-2">
-                                <Label>Responsável</Label>
+                                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Responsável</Label>
                                 {role === 'admin' ? (
                                     <Select value={assignedTo} onValueChange={setAssignedTo}>
-                                        <SelectTrigger>
+                                        <SelectTrigger className="h-11 bg-card hover:bg-accent/50 transition-colors">
                                             <SelectValue placeholder="Selecione..." />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -212,64 +263,94 @@ export function ClientDetailsSheet({
                                         </SelectContent>
                                     </Select>
                                 ) : (
-                                    <div className="text-sm border rounded-md p-2 bg-secondary text-muted-foreground truncate">
+                                    <div className="h-11 flex items-center px-3 text-sm rounded-md bg-card text-muted-foreground truncate border">
                                         {allUsers.find(u => u.id === assignedTo)?.name || 'Não atribuído'}
                                     </div>
                                 )}
                             </div>
                         </div>
 
-                        {/* Date Picker */}
-                        <div className="space-y-2">
-                            <Label>Data da Limpeza</Label>
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        variant={"outline"}
-                                        className={cn(
-                                            "w-full justify-start text-left font-normal",
-                                            !cleaningDate && "text-muted-foreground"
-                                        )}
-                                    >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {cleaningDate ? format(cleaningDate, "PPP", { locale: ptBR }) : <span>Selecione uma data</span>}
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0" align="start">
-                                    <Calendar
-                                        mode="single"
-                                        selected={cleaningDate}
-                                        onSelect={setCleaningDate}
-                                        initialFocus
-                                        locale={ptBR}
-                                    />
-                                </PopoverContent>
-                            </Popover>
+                        {/* Instance & Date */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-2">
+                                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">WhatsApp Conexão</Label>
+                                {role === 'admin' ? (
+                                    <Select value={instanceName} onValueChange={setInstanceName}>
+                                        <SelectTrigger className="h-11 bg-card hover:bg-accent/50 transition-colors">
+                                            <SelectValue placeholder="Padrão" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="default">Automático (Padrão)</SelectItem>
+                                            {instances.map(inst => (
+                                                <SelectItem key={inst.id} value={inst.instance_name}>
+                                                    {inst.instance_name} ({inst.provider === 'meta' ? 'Meta' : 'Evo'})
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                ) : (
+                                    <div className="h-11 flex items-center px-3 text-sm rounded-md bg-card text-muted-foreground truncate border">
+                                        {instanceName === 'default' ? 'Automático (Padrão)' : instanceName}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="space-y-2">
+                                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Data da Limpeza</Label>
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            variant={"outline"}
+                                            className={cn(
+                                                "w-full h-11 justify-start text-left font-normal bg-card hover:bg-accent/50 transition-colors",
+                                                !cleaningDate && "text-muted-foreground"
+                                            )}
+                                        >
+                                            <CalendarIcon className="mr-2 h-4 w-4" />
+                                            {cleaningDate ? format(cleaningDate, "PPP", { locale: ptBR }) : <span>Selecione uma data</span>}
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0" align="start">
+                                        <Calendar
+                                            mode="single"
+                                            selected={cleaningDate}
+                                            onSelect={setCleaningDate}
+                                            initialFocus
+                                            locale={ptBR}
+                                        />
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
                         </div>
 
                         {/* Budget */}
                         <div className="space-y-2">
-                            <Label>Orçamento (R$)</Label>
+                            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Orçamento (R$)</Label>
                             <Input
                                 type="number"
                                 value={budget}
                                 onChange={(e) => setBudget(e.target.value)}
                                 placeholder="0.00"
+                                className="h-11 bg-card hover:bg-accent/50 focus:bg-accent transition-colors"
                             />
                         </div>
 
                         {/* Notes */}
                         <div className="space-y-2">
-                            <Label>Observações</Label>
+                            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Observações</Label>
                             <Textarea
                                 value={notes}
                                 onChange={(e) => setNotes(e.target.value)}
                                 placeholder="Digite observações importantes..."
                                 rows={5}
+                                className="resize-none bg-card hover:bg-accent/50 focus:bg-accent transition-colors"
                             />
                         </div>
 
-                        <Button onClick={handleSave} disabled={loading} className="w-full">
+                        <Button
+                            onClick={handleSave}
+                            disabled={loading}
+                            className="w-full h-11 bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-sm"
+                        >
                             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Salvar Alterações
                         </Button>
@@ -277,11 +358,11 @@ export function ClientDetailsSheet({
                         {/* Danger Zone */}
                         {role === 'admin' && (
                             <div className="pt-6 border-t space-y-3">
-                                <Label className="text-destructive">Zona de Perigo</Label>
-                                <div className="grid grid-cols-2 gap-2">
+                                <Label className="text-xs font-semibold text-destructive uppercase tracking-wide">Zona de Perigo</Label>
+                                <div className="grid grid-cols-2 gap-3">
                                     <Button
                                         variant="outline"
-                                        className="text-orange-500 hover:text-orange-600 hover:bg-orange-50"
+                                        className="h-10 text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700 hover:border-orange-300 transition-colors"
                                         onClick={() => triggerConfirm('clear')}
                                     >
                                         <MessageSquare className="mr-2 h-4 w-4" />
@@ -289,7 +370,7 @@ export function ClientDetailsSheet({
                                     </Button>
                                     <Button
                                         variant="outline"
-                                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                        className="h-10 text-destructive border-destructive/30 hover:bg-destructive/10 hover:border-destructive/50 transition-colors"
                                         onClick={() => triggerConfirm('delete')}
                                     >
                                         <Trash2 className="mr-2 h-4 w-4" />

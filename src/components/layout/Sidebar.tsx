@@ -16,6 +16,7 @@ const menuItems = [
   { icon: BarChart3, label: 'Dashboard', path: '/dashboard', adminOnly: true },
   { icon: MessageSquare, label: 'Conversas', path: '/conversas', adminOnly: false },
   { icon: Columns3, label: 'Kanban', path: '/kanban', adminOnly: false },
+  { icon: MessageSquare, label: 'Templates', path: '/templates', adminOnly: true },
   { icon: Settings, label: 'Configurações', path: '/config', adminOnly: true },
 ];
 
