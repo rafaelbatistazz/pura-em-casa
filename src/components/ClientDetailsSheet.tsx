@@ -283,7 +283,7 @@ export function ClientDetailsSheet({
                                             <SelectItem value="default">Automático (Padrão)</SelectItem>
                                             {instances.map(inst => (
                                                 <SelectItem key={inst.id} value={inst.instance_name}>
-                                                    {inst.instance_name} ({inst.provider === 'meta' ? 'Meta' : 'Evo'})
+                                                    {inst.instance_name} ({inst.provider === 'meta' ? 'Meta' : 'API'})
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>

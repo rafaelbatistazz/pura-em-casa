@@ -32,6 +32,7 @@ export interface Lead {
   utm_content?: string | null;
   users?: User;
   instance_name?: string | null;
+  budget?: number | null;
 }
 
 export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'sticker' | null;

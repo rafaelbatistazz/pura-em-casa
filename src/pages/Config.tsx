@@ -889,7 +889,7 @@ Gostaria de agendar um horário conosco? 🤗"
         if (!response.ok) {
           const errorText = await response.text();
           console.error('Evolution API Error:', errorText);
-          throw new Error(`Evolution API retornou ${response.status}: ${errorText}`);
+          throw new Error(`API retornou ${response.status}: ${errorText}`);
         }
 
         const data = await response.json();
@@ -1252,7 +1252,7 @@ Gostaria de agendar um horário conosco? 🤗"
       });
 
       if (!response.ok) {
-        throw new Error('Falha ao buscar instâncias na Evolution API');
+        throw new Error('Falha ao buscar instâncias na API');
       }
 
       const evolutionInstances = await response.json();
@@ -1322,7 +1322,7 @@ Gostaria de agendar um horário conosco? 🤗"
 
     } catch (error) {
       console.error('Sync Error:', error);
-      toast.error('Erro ao sincronizar com Evolution');
+      toast.error('Erro ao sincronizar com API');
     } finally {
       setLoading(false);
     }
