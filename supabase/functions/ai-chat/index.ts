@@ -123,8 +123,11 @@ Poderia nos enviar uma foto de seus estofados, por gentileza?!"
 **IMPORTANTE:**
 1. **Analise a foto** e identifique qual móvel é (Sofá, Colchão, Cadeira, etc).
 2. **SELECIONE APENAS UM** conjunto de perguntas abaixo (o que melhor se aplica).
-3. **NUNCA** envie a lista completa ("Se for sofá..., Se for colchão..."). Isso é proibido.
 4. **Responda** agradecendo e já fazendo a pergunta específica.
+5. **BLOQUEIO DE PROGRESSO:** NÃO avance para o Estado 3 sem saber:
+    - O TIPO do móvel (ex: Sofá Padrão, Retrátil, Cama, etc).
+    - O TAMANHO aproximado (ex: 2 lugares, 3 lugares, King, Queen).
+    - Se a foto não deixar claro, **PERGUNTE**. Não adivinhe se tiver dúvida.
 
 **Exemplo (Se for Sofá):**
 "Agradeço o envio da foto!
@@ -135,8 +138,8 @@ Este sofá é retrátil ou reclinável? As almofadas são soltas?"
 #### Para SOFÁ:
 - "Este sofá é retrátil ou reclinável?"
 - "As almofadas do encosto são soltas ou fixas?"
+- "Quantos lugares ele tem aproximadamente? (ex: 2, 3, 4 lugares ou medidas)"
 - Se sofá-cama: "Este é um modelo sofá-cama?"
-- Se não souber tamanho: "Pela foto, parece ser um sofá de [X] lugares. Está correto?"
 
 #### Para COLCHÃO:
 - "Quer limpar a base do colchão também ou só o colchão?"
@@ -168,9 +171,9 @@ Se cliente não responder algo crítico, confirme pela foto:
 "Pela foto, [descrição]. Está correto?"
 
 **Após qualificação completa:**
-"Perfeito! 
+"Perfeito!
 
-Aproveito para te mostrar como é nosso método de limpeza de estofados e já te mando o orçamento combinado? 🛋️✨"
+Vou te explicar como funciona nosso método exclusivo. 🛋️✨"
 
 ---
 
@@ -194,8 +197,9 @@ Nosso processo vai muito além de uma limpeza comum. Ele remove sujeiras impregn
 
 Tudo isso com produtos profissionais, pH neutro, tecnologia de extração e total preservação da cor, textura e maciez do tecido."
 
-### Etapa 3.2: Enviar IMAGEM
-(AGORA: PARE DE ESCREVER E CHAME A FUNÇÃO send_media("processo_8_etapas"))
+### Etapa 3.2: Enviar IMAGEM (OBRIGATÓRIO)
+(AGORA: PARE DE ESCREVER E CHAME A FUNÇÃO \`send_media("processo_8_etapas")\`.)
+**NÃO ESCREVA MAIS NADA NESTA MENSAGEM. APENAS CHAME A TOOL.**
 
 ### Etapa 3.3: Texto Intermediário
 **Após enviar a imagem:**
@@ -210,8 +214,9 @@ Mas é claro que essa limpeza vai muito além da remoção da sujeiras. Também 
 
 O índice que temos na remoção das sujeiras é de 100% ou seja, o estofado fica verdadeiramente limpo."
 
-### Etapa 3.5: Enviar VÍDEO
-(AGORA: PARE DE ESCREVER E CHAME A FUNÇÃO send_media("demonstracao_limpeza"))
+### Etapa 3.5: Enviar VÍDEO (OBRIGATÓRIO)
+(AGORA: PARE DE ESCREVER E CHAME A FUNÇÃO \`send_media("demonstracao_limpeza")\`.)
+**NÃO ESCREVA MAIS NADA NESTA MENSAGEM. APENAS CHAME A TOOL.**
 
 ### Etapa 3.6: Pedir Confirmação para Orçamento
 **IMPORTANTE: APÓS ENVIAR O VÍDEO, PERGUNTE SE PODE ENVIAR O ORÇAMENTO.**
@@ -496,17 +501,20 @@ Deno.serve(async (req) => {
 
         // SYSTEM PROMPT ENHANCEMENTS
         const visionRules = `
-PROTOCOLO DE VISÃO (OLHOS DA TAMIRES):
-1. GATILHO:
-   - ESTE PROTOCOLO SÓ SE APLICA SE O USUÁRIO ENVIOU UMA FOTO NA ÚLTIMA MENSAGEM.
-   - SE NÃO HOUVER FOTO: Ignore este protocolo e siga o fluxo normal de texto.
+PROTOCOLO DE VISÃO & INTELIGÊNCIA (OLHOS DA TAMIRES):
+1. VERIFICAÇÃO DE INPUT (CRÍTICO):
+   - Olhe o metadado "[CONTEXTO DE TEMPO REAL] -> TIPO DA ÚLTIMA MENSAGEM RECEBIDA".
+   - Se for "TEXT": O USUÁRIO NÃO MANDOU FOTO.
+     -> Ação: Se ele mandou "Oi", "Tudo bem?" ou texto aleatório, RESPONDA ao texto primeiro com simpatia. (Ex: "Tudo ótimo! ✨").
+     -> SÓ DEPOIS reforce o pedido da foto. NÃO finja que recebeu foto.
+   - Se for "IMAGE": O cliente mandou foto. Prossiga para item 2.
 
-2. ANÁLISE CRÍTICA (SOMENTE SE HOUVER FOTO):
+2. ANÁLISE CRÍTICA (SOMENTE SE TIPO = IMAGE):
    - Ao receber foto, PRIMEIRO identifique: É Sofá, Cadeira, Poltrona, Tapete ou Colchão?
    - Cadeira de Jantar (comum em fotos verticais) NÃO É SOFÁ.
    - Poltrona (1 lugar) NÃO É SOFÁ.
 
-3. RESPOSTA DA VISÃO (SOMENTE SE HOUVER FOTO):
+3. RESPOSTA DA VISÃO (SOMENTE SE TIPO = IMAGE):
    - Diga APENAS: "Obg pelo envio da foto!"
    - E em seguida a pergunta de qualificação.
    - NUNCA descreva o que você viu ("Parece um sofá..."), apenas use a informação para classificar.
@@ -563,7 +571,14 @@ REGRAS CRÍTICAS DE MÍDIA:
         const evolutionUrl = Deno.env.get('EVOLUTION_API_URL') || 'https://evo.advfunnel.com.br';
         const evolutionApiKey = Deno.env.get('EVOLUTION_API_KEY') || 'ESWH6B36nhfW3apMfQQAv3SU2CthsZCg';
 
-        let instanceName = inputInstanceName;
+        // MOVED UP: Fetch Lead Data first to get instance_name
+        const { data: leadData } = await supabaseClient
+            .from('leads')
+            .select('phone, status, instance_name')
+            .eq('id', leadId)
+            .single();
+
+        let instanceName = inputInstanceName || leadData?.instance_name;
         if (!instanceName) {
             const { data: instanceConfig } = await supabaseClient
                 .from('system_config')
@@ -573,11 +588,12 @@ REGRAS CRÍTICAS DE MÍDIA:
             instanceName = instanceConfig?.value;
         }
 
-        const { data: leadData } = await supabaseClient
-            .from('leads')
-            .select('phone')
-            .eq('id', leadId)
-            .single();
+        // RE-ENGAGEMENT LOGIC:
+        // If lead sends a message and is in 'Follow-up' or 'Sumiu', move back to 'Oportunidade' to show they are active again.
+        if (leadData && (leadData.status === 'Follow-up' || leadData.status === 'Sumiu')) {
+            console.log(`🔄 Re-engaging lead ${leadId} (From ${leadData.status} -> Oportunidade)`);
+            await supabaseClient.from('leads').update({ status: 'Oportunidade' }).eq('id', leadId);
+        }
 
         // OpenAI Call
         const tools = [
@@ -708,7 +724,7 @@ IMPORTANTÍSSIMO SOBRE DATAS E AGENDAMENTO:
 
         let currentMessages = [
             { role: 'system', content: aiConfig.system_prompt },
-            { role: 'system', content: `[CONTEXTO DE TEMPO REAL]\nDATA E HORA ATUAL: ${timeString}.\nUse esta data como referência absoluta para "hoje", "amanhã", "ontem", etc.` },
+            { role: 'system', content: `[CONTEXTO DE TEMPO REAL]\nDATA E HORA ATUAL: ${timeString}.\nTIPO DA ÚLTIMA MENSAGEM RECEBIDA: ${mediaType ? mediaType.toUpperCase() : 'TEXT'}.\nUse esta data como referência absoluta para "hoje", "amanhã", "ontem", etc.` },
             ...history,
             { role: 'user', content: currentMessageContent },
             {
@@ -790,6 +806,8 @@ IMPORTANTÍSSIMO SOBRE DATAS E AGENDAMENTO:
 
                 for (const part of textParts) {
                     const cleanPhone = leadData.phone.replace(/\D/g, '');
+                    // Use JID format to match frontend/Evolution expectations
+                    const targetNumber = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
 
                     // Random delay between 4000ms and 9000ms is passed to Evolution API
                     const textDelay = Math.floor(Math.random() * (9000 - 4000 + 1) + 4000);
@@ -805,7 +823,7 @@ IMPORTANTÍSSIMO SOBRE DATAS E AGENDAMENTO:
                                 'apikey': evolutionApiKey
                             },
                             body: JSON.stringify({
-                                number: cleanPhone,
+                                number: targetNumber,
                                 text: part,
                                 delay: textDelay, // Compatibility with root level delay
                                 options: {
@@ -870,6 +888,7 @@ IMPORTANTÍSSIMO SOBRE DATAS E AGENDAMENTO:
                                 functionResult = `Error: Mídia '${args.media_type}' JÁ FOI ENVIADA anteriormente. NÃO envie novamente. Prossiga com o texto.`;
                             } else if (mediaUrl && evolutionUrl && evolutionApiKey && instanceName && leadData?.phone) {
                                 const cleanPhone = leadData.phone.replace(/\D/g, '');
+                                const targetNumber = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
 
                                 // RANDOM DELAY 4s - 8s (Humanization)
                                 const mediaDelay = Math.floor(Math.random() * (8000 - 4000 + 1) + 4000);
@@ -877,7 +896,7 @@ IMPORTANTÍSSIMO SOBRE DATAS E AGENDAMENTO:
                                 await new Promise(resolve => setTimeout(resolve, mediaDelay));
 
                                 const mediaBody = {
-                                    number: cleanPhone,
+                                    number: targetNumber,
                                     mediatype: mediaType,
                                     mediaType: mediaType,
                                     mimetype: mediaType === 'image' ? 'image/webp' : 'video/mp4',

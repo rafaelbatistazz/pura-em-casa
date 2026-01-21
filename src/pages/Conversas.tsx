@@ -146,6 +146,24 @@ export default function Conversas() {
   const [editingNotes, setEditingNotes] = useState(''); // Kept for legacy compatibility or removal
   const [savingNotes, setSavingNotes] = useState(false); // Kept for legacy compatibility or removal
 
+  // Instance management
+  const [activeInstances, setActiveInstances] = useState<{ instance_name: string }[]>([]);
+  const [selectedInstance, setSelectedInstance] = useState<string>('');
+
+  useEffect(() => {
+    supabase
+      .from('instances')
+      .select('instance_name')
+      .eq('status', 'connected')
+      .eq('provider', 'evolution')
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setActiveInstances(data);
+          setSelectedInstance(data[0].instance_name);
+        }
+      });
+  }, []);
+
 
 
   // Media states
@@ -599,27 +617,32 @@ export default function Conversas() {
 
     setSendingMessage(true);
     try {
-      // Fetch ONLY instance name from database
-      const { data: config } = await supabase
-        .from('system_config')
-        .select('value')
-        .eq('key', 'evolution_instance_name')
-        .maybeSingle(); // Use maybeSingle to avoid 406 error if not found/multiple
+      // Use selected instance or fallback to first available
+      let instanceName = selectedInstance || activeInstances?.[0]?.instance_name;
 
-      const instance = config?.value;
+      if (!instanceName) {
+        // Fallback fetch logic if state is empty
+        const { data: instancesData } = await supabase
+          .from('instances')
+          .select('instance_name')
+          .eq('status', 'connected')
+          .eq('provider', 'evolution')
+          .limit(1);
+        instanceName = instancesData?.[0]?.instance_name || '';
+      }
 
-      // 1. Sempre tenta enviar via API se configurado
-      if (instance) {
+      // 2. Sempre tenta enviar via API se configurado
+      if (instanceName) {
         try {
           if (mediaUrl && mediaType) {
             if (mediaType === 'audio') {
-              await fetch(`${EVOLUTION_API_URL}/message/sendWhatsAppAudio/${instance}`, {
+              await fetch(`${EVOLUTION_API_URL}/message/sendWhatsAppAudio/${instanceName}`, {
                 method: 'POST',
                 headers: { apikey: EVOLUTION_API_KEY, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ number: selectedLead.phone, audio: mediaUrl }),
               });
             } else {
-              await fetch(`${EVOLUTION_API_URL}/message/sendMedia/${instance}`, {
+              await fetch(`${EVOLUTION_API_URL}/message/sendMedia/${instanceName}`, {
                 method: 'POST',
                 headers: { apikey: EVOLUTION_API_KEY, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -631,7 +654,7 @@ export default function Conversas() {
               });
             }
           } else {
-            await fetch(`${EVOLUTION_API_URL}/message/sendText/${instance}`, {
+            await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
               method: 'POST',
               headers: { apikey: EVOLUTION_API_KEY, 'Content-Type': 'application/json' },
               body: JSON.stringify({ number: selectedLead.phone, text: messageText }),
@@ -641,7 +664,7 @@ export default function Conversas() {
           console.error('Erro ao enviar via API:', apiError);
         }
       } else {
-        console.error('Instância não configurada. Mensagem salva apenas no banco.');
+        console.error('Instância não configurada/conectada. Mensagem salva apenas no banco.');
         toast.warning('WhatsApp desconectado. Mensagem salva apenas no sistema.');
       }
 
@@ -1450,6 +1473,37 @@ export default function Conversas() {
 
               {/* Actions */}
               <div className="flex items-center gap-2 shrink-0">
+                {/* Instance Selector */}
+                {activeInstances.length > 0 && (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:bg-secondary" title={`Instância: ${selectedInstance}`}>
+                        <MessageSquare className="h-5 w-5" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-56 p-2 bg-popover border-border z-[200]" align="end">
+                      <div className="space-y-1">
+                        <h4 className="font-medium text-xs px-2 mb-2 text-foreground">Enviar via:</h4>
+                        {activeInstances.map(inst => (
+                          <Button
+                            key={inst.instance_name}
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                              "w-full justify-start text-xs h-8 px-2 font-normal truncate",
+                              selectedInstance === inst.instance_name && "bg-secondary font-medium"
+                            )}
+                            onClick={() => setSelectedInstance(inst.instance_name)}
+                          >
+                            {inst.instance_name}
+                            {selectedInstance === inst.instance_name && <CheckCheck className="ml-auto h-3 w-3" />}
+                          </Button>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                )}
+
                 {/* Automations Settings */}
                 <Popover>
                   <PopoverTrigger asChild>

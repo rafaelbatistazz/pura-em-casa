@@ -775,6 +775,7 @@ Gostaria de agendar um horário conosco? 🤗"
     }
   }, [role, instances.length, checkConnectionStatus]);
 
+
   const generateQRCode = async (instance: Instance) => {
     try {
       if (instance.provider !== 'evolution') return;
@@ -788,14 +789,31 @@ Gostaria de agendar um horário conosco? 🤗"
       console.log('QR Code Response:', data);
 
       if (data.qrcode?.base64 || data.base64) {
-        // Update local state temporarily to show QR
+        const qrCode = data.qrcode?.base64 || data.base64;
+
+        // Update BOTH local state AND database
         setInstances(prev => prev.map(i =>
           i.instance_name === instance.instance_name
-            ? { ...i, qr_code: data.qrcode?.base64 || data.base64, status: 'connecting' }
+            ? { ...i, qr_code: qrCode, status: 'connecting' }
             : i
         ));
+
+        // Persist to database
+        await supabase.from('instances').update({
+          qr_code: qrCode,
+          status: 'connecting'
+        }).eq('instance_name', instance.instance_name);
+
+        console.log('✅ QR Code updated and saved to DB');
       } else if (data.instance?.state === 'open') {
         toast.success('WhatsApp conectado!');
+
+        // Update to connected
+        await supabase.from('instances').update({
+          status: 'connected',
+          qr_code: null
+        }).eq('instance_name', instance.instance_name);
+
         checkConnectionStatus(); // Force status update
       }
     } catch (error) {
@@ -803,6 +821,27 @@ Gostaria de agendar um horário conosco? 🤗"
       toast.error('Erro ao gerar QR Code');
     }
   };
+
+  // AUTO-REFRESH QR CODES FOR CONNECTING INSTANCES (prevents expiration)
+  useEffect(() => {
+    if (role !== 'admin' || instances.length === 0) return;
+
+    const connectingInstances = instances.filter(i => i.status === 'connecting' && i.provider === 'evolution');
+
+    if (connectingInstances.length === 0) return;
+
+    console.log(`🔄 Auto-refreshing QR for ${connectingInstances.length} connecting instance(s)`);
+
+    // Refresh QR codes every 30 seconds
+    const interval = setInterval(() => {
+      connectingInstances.forEach(instance => {
+        console.log(`♻️ Refreshing QR for ${instance.instance_name}`);
+        generateQRCode(instance);
+      });
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(interval);
+  }, [role, instances, generateQRCode]);
 
   const handleCreateInstance = async () => {
     if (!newInstanceName) {
@@ -820,7 +859,9 @@ Gostaria de agendar um horário conosco? 🤗"
     setCreatingInstance(true);
     try {
       if (provider === 'evolution') {
-        // 1. Create Instance in Evolution
+        // 1. Create Instance in Evolution WITH WEBHOOK
+        const webhookUrl = `https://ragnzmmnqtogmodkfayj.supabase.co/functions/v1/evolution-webhook`;
+
         const response = await fetch(`${EVOLUTION_API_URL}/instance/create`, {
           method: 'POST',
           headers: {
@@ -829,24 +870,73 @@ Gostaria de agendar um horário conosco? 🤗"
           },
           body: JSON.stringify({
             instanceName: newInstanceName,
-            token: 'random_token',
             qrcode: true,
+            integration: "WHATSAPP-BAILEYS",
+            webhook: webhookUrl,
+            webhook_by_events: false,
+            webhook_base64: true,
+            events: [
+              "QRCODE_UPDATED",
+              "MESSAGES_UPSERT",
+              "MESSAGES_UPDATE",
+              "MESSAGES_DELETE",
+              "SEND_MESSAGE",
+              "CONNECTION_UPDATE"
+            ]
           }),
         });
 
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Evolution API Error:', errorText);
+          throw new Error(`Evolution API retornou ${response.status}: ${errorText}`);
+        }
+
         const data = await response.json();
+        console.log('✅ Evolution API Response:', data);
 
         // 2. Save to Supabase
-        const { error } = await supabase.from('instances').insert({
+        const { error: insertError } = await supabase.from('instances').insert({
           instance_name: newInstanceName,
           api_url: EVOLUTION_API_URL,
           api_key: EVOLUTION_API_KEY,
-          qr_code: data.qrcode?.base64 || null,
+          qr_code: data.qrcode?.base64 || data.base64 || null,
           status: 'connecting',
           provider: 'evolution',
         });
 
-        if (error) throw error;
+        if (insertError) {
+          console.error('Supabase Insert Error:', insertError);
+          throw insertError;
+        }
+
+        // 3. ATTEMPT TO GENERATE QR CODE (If not already present)
+        if (!data.qrcode?.base64 && !data.base64) {
+          console.log('⏳ QR not in initial response, calling /instance/connect...');
+          try {
+            const connectResponse = await fetch(`${EVOLUTION_API_URL}/instance/connect/${newInstanceName}`, {
+              method: 'GET',
+              headers: { apikey: EVOLUTION_API_KEY },
+            });
+
+            if (connectResponse.ok) {
+              const connectData = await connectResponse.json();
+              console.log('✅ Connect Response:', connectData);
+
+              if (connectData.qrcode?.base64 || connectData.base64) {
+                // Update DB with QR
+                await supabase.from('instances').update({
+                  qr_code: connectData.qrcode?.base64 || connectData.base64
+                }).eq('instance_name', newInstanceName);
+              }
+            } else {
+              console.warn('⚠️ Connect endpoint failed:', await connectResponse.text());
+            }
+          } catch (connectError) {
+            console.error('Error calling connect:', connectError);
+            // Non-fatal, continue
+          }
+        }
       } else {
         // META PROVIDER
         const { error } = await supabase.from('instances').insert({
@@ -865,9 +955,14 @@ Gostaria de agendar um horário conosco? 🤗"
 
       toast.success('Instância criada com sucesso!');
       setNewInstanceOpen(false);
+      setNewInstanceName('');
       // Remove setInstanceName - using list now
       // Remove upsert system_config - deprecated
-      fetchConfigs();
+
+      // Wait a bit before refreshing to allow DB propagation
+      setTimeout(() => {
+        fetchConfigs();
+      }, 500);
 
     } catch (error) {
       console.error('Error creating instance:', error);

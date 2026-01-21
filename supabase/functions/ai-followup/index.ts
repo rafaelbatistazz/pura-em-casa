@@ -46,7 +46,7 @@ serve(async (req) => {
         // 2. Get Conversation History
         const { data: messages } = await supabase
             .from('messages')
-            .select('role, message_text, sender_name, direction')
+            .select('message_text, sender_name, direction')
             .eq('lead_id', lead_id)
             .order('timestamp', { ascending: false })
             .limit(30);
@@ -98,12 +98,12 @@ serve(async (req) => {
             case '10m':
                 baseScript = `
         Opção 1: "👀"
-        Opção 2: "Só para eu não te passar uma informação errada: você sabe me dizer qual é o tecido do seu móvel? Isso ajuda na técnica para fazer a blindagem ou limpeza sem danificar."
+        Opção 2: "Oii"
         Escolha a que fizer mais sentido com o contexto imediatamente anterior. Se for início de conversa, Opção 2 é boa.
         `;
                 break;
             case '1h':
-                baseScript = `"Conseguiu verificar a questão do tecido ou tem alguma dúvida sobre o orçamento?"`;
+                baseScript = `"Só para eu não te passar uma informação errada: você sabe me dizer qual é o tecido do seu móvel? Isso ajuda na técnica para fazer a blindagem ou limpeza sem danificar."`;
                 break;
             case '24h':
                 baseScript = `"Estava discutindo seu caso com meu técnico agora. Baseado na foto que você me mandou (ou no que me falou), conseguimos remover essas manchas/fazer o serviço, mas preciso te alertar sobre um detalhe se você demorar muito para impermeabilizar. Consegue falar rapidinho?"`;
@@ -129,8 +129,15 @@ serve(async (req) => {
       ${baseScript}
 
       Tarefa: Reescreva/Adapte o Script Base para se encaixar naturalmente no histórico.
+      
+      REGRAS CRÍTICAS DE 10 MINUTOS:
+      - Se for 10m: ENVIE EXATAMENTE A OPÇÃO ESCOLHIDA ("Oii" ou "👀").
+      - PROIBIDO adicionar saudações extras, perguntas ou recapitulações.
+      - PROIBIDO escrever "Só passando para saber...", "Oi tudo bem", etc.
+      - O objetivo é parecer que a pessoa mandou uma mensagem rápida pq o cliente parou de responder. SEJA EXTREMAMENTE CURTO.
+
+      Regras Gerais:
       - Mantenha a essência persuasiva do script.
-      - Se for 10m, seja muito casual.
       - Se for 1h, follow-up leve.
       - Se for 24h, gere curiosidade técnica.
       - Se for 48h, use o gatilho de "perda/despriorização".
@@ -154,9 +161,9 @@ serve(async (req) => {
             .select('key, value')
             .in('key', ['evolution_api_url', 'evolution_api_key', 'evolution_instance_name']);
 
-        const evoUrl = evoConfigs?.find(c => c.key === 'evolution_api_url')?.value;
-        const evoKey = evoConfigs?.find(c => c.key === 'evolution_api_key')?.value;
-        const instanceName = evoConfigs?.find(c => c.key === 'evolution_instance_name')?.value;
+        const evoUrl = evoConfigs?.find(c => c.key === 'evolution_api_url')?.value || Deno.env.get('EVOLUTION_API_URL') || 'https://evo.advfunnel.com.br';
+        const evoKey = evoConfigs?.find(c => c.key === 'evolution_api_key')?.value || Deno.env.get('EVOLUTION_API_KEY') || 'ESWH6B36nhfW3apMfQQAv3SU2CthsZCg';
+        const instanceName = evoConfigs?.find(c => c.key === 'evolution_instance_name')?.value || Deno.env.get('EVOLUTION_INSTANCE_NAME');
 
         if (evoUrl && evoKey && instanceName && finalMessage) {
             await fetch(`${evoUrl}/message/sendText/${instanceName}`, {
@@ -180,6 +187,11 @@ serve(async (req) => {
                 sender_name: 'AI Follow-up',
                 timestamp: new Date().toISOString()
             });
+
+            // Update status to 'Follow-up' if not already (and not 72h which goes to Sumiu)
+            if (normalizedTime !== '72h' && lead.status !== 'Follow-up') {
+                await supabase.from('leads').update({ status: 'Follow-up' }).eq('id', lead_id);
+            }
 
             // If 72h, disable follow-ups AND move to Sumiu
             if (normalizedTime === '72h') {

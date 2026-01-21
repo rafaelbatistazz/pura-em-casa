@@ -48,11 +48,22 @@ serve(async (req: Request) => {
       }
 
       // Extract phone number (remove @s.whatsapp.net or @g.us)
-      const remoteJid = data.key.remoteJid || '';
-      const phone = remoteJid.replace(/@s\.whatsapp\.net|@g\.us/g, '');
+      // Extract phone number (Smart Selection to avoid @lid)
+      const rawRemoteJid = data.key.remoteJid || '';
+      const rawRemoteJidAlt = data.key.remoteJidAlt || '';
+
+      let targetJid = rawRemoteJid;
+
+      // Logic: If remoteJid has @lid (Liquidity ID) and we have an alternative that DOESN'T, use the alternative.
+      if (rawRemoteJid.includes('@lid') && rawRemoteJidAlt && !rawRemoteJidAlt.includes('@lid')) {
+        console.log(`⚠️ Detected @lid in remoteJid (${rawRemoteJid}). Swapping to remoteJidAlt (${rawRemoteJidAlt}).`);
+        targetJid = rawRemoteJidAlt;
+      }
+
+      const phone = targetJid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
 
       // Skip group messages for now
-      if (remoteJid.includes('@g.us')) {
+      if (rawRemoteJid.includes('@g.us')) {
         console.log('Skipping group message');
         return new Response(
           JSON.stringify({ success: true, message: 'Group message skipped' }),
@@ -61,7 +72,7 @@ serve(async (req: Request) => {
       }
 
       // Skip status broadcasts
-      if (remoteJid === 'status@broadcast') {
+      if (rawRemoteJid === 'status@broadcast') {
         console.log('Skipping status broadcast');
         return new Response(
           JSON.stringify({ success: true, message: 'Status broadcast skipped' }),
@@ -276,6 +287,61 @@ serve(async (req: Request) => {
           leadId,
           message: 'Message processed successfully'
         }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Handle connection events
+    const eventType = (body.event || '').toUpperCase();
+
+    if (eventType === 'CONNECTION_UPDATE' || eventType === 'CONNECTION.UPDATE') {
+      const status = body.data?.status || body.data?.statusReason;
+      console.log(`Connection update for ${body.instance}: ${status}`);
+
+      // Trigger n8n webhook on connection success
+      if (status === 'open' || status === 'connected') {
+        try {
+          const instanceName = body.instance;
+          const n8nUrl = `https://n8n.advfunnel.com.br/webhook/5f27db92-6051-4d28-9ff0-9047f6622c82/${instanceName}`;
+
+          console.log(`Triggering n8n webhook: ${n8nUrl}`);
+
+          await fetch(n8nUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              instance: instanceName,
+              status: 'connected',
+              timestamp: new Date().toISOString(),
+              data: body.data
+            })
+          });
+          console.log('n8n webhook triggered successfully');
+        } catch (err) {
+          console.error('Failed to trigger n8n webhook:', err);
+        }
+      }
+
+      // Update instances table in Supabase to reflect real-time status
+      let dbStatus = 'disconnected';
+      const s = String(status).toLowerCase();
+      if (s === 'open' || s === 'connected') dbStatus = 'connected';
+      else if (s === 'connecting') dbStatus = 'connecting';
+
+      console.log(`Syncing status '${dbStatus}' to DB for instance ${body.instance}`);
+
+      const { error: updateError } = await supabase
+        .from('instances')
+        .update({
+          status: dbStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq('instance_name', body.instance);
+
+      if (updateError) console.error('Failed to update instance status in DB:', updateError);
+
+      return new Response(
+        JSON.stringify({ success: true, message: 'Connection update processed' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
