@@ -153,12 +153,12 @@ export default function Conversas() {
   const [selectedInstance, setSelectedInstance] = useState<string>('');
 
   useEffect(() => {
-    supabase
+    (supabase as any)
       .from('instances')
       .select('instance_name')
       .eq('status', 'connected')
       .eq('provider', 'evolution')
-      .then(({ data }) => {
+      .then(({ data }: any) => {
         if (data && data.length > 0) {
           setActiveInstances(data);
           setSelectedInstance(data[0].instance_name);
@@ -321,7 +321,7 @@ export default function Conversas() {
 
 
       // Use RPC instead of direct update to bypass potential RLS issues
-      await supabase.rpc('mark_messages_read', { p_lead_id: leadId });
+      await (supabase.rpc as any)('mark_messages_read', { p_lead_id: leadId });
 
       setLeads((prev) =>
         prev.map((lead) =>
@@ -334,7 +334,6 @@ export default function Conversas() {
 
   // Initial fetch and realtime subscription
   useEffect(() => {
-    fetchLeads();
     fetchLeads();
     // Allow all users to fetch profiles for name mapping
     fetchUsers();
@@ -350,7 +349,7 @@ export default function Conversas() {
           table: 'leads',
         },
         async (payload) => {
-          console.log('Lead change received:', payload); // Debug log
+          // console.log('Lead change received:', payload); // Debug log
           if (payload.eventType === 'INSERT') {
             const newLead = payload.new as Lead;
 
@@ -423,7 +422,7 @@ export default function Conversas() {
           table: 'messages',
         },
         (payload) => {
-          console.log('Global message received:', payload); // Debug log
+          // console.log('Global message received:', payload); // Debug log
           const newMessage = payload.new as Message;
 
           setLeads((prev) => {
@@ -447,8 +446,8 @@ export default function Conversas() {
                 // Use effect side-effect: If it IS the current conversation, mark as read in DB immediately
                 // Use effect side-effect: If it IS the current conversation, mark as read in DB immediately
                 if (isCurrentConversation && newMessage.direction === 'inbound' && !newMessage.read) {
-                  supabase.rpc('mark_messages_read', { p_lead_id: newMessage.lead_id })
-                    .then(({ error }) => {
+                  (supabase.rpc as any)('mark_messages_read', { p_lead_id: newMessage.lead_id })
+                    .then(({ error }: any) => {
                       if (error) console.error('Error marking new message as read:', error);
                     });
                 }
@@ -606,6 +605,7 @@ export default function Conversas() {
       id: `temp-${Date.now()}`,
       lead_id: selectedLead.id,
       phone: selectedLead.phone,
+      whatsapp_id: null,
       message_text: messageText,
       media_url: mediaUrl || null,
       media_type: mediaType || null,
@@ -681,6 +681,7 @@ export default function Conversas() {
       await supabase.from('messages').insert([{
         lead_id: selectedLead.id,
         phone: selectedLead.phone,
+        whatsapp_id: null,
         message_text: messageText,
         media_url: mediaUrl || null,
         media_type: mediaType || null,
@@ -895,7 +896,7 @@ export default function Conversas() {
             setAudioProgress(prev => ({ ...prev, [messageId]: 0 }));
           };
           audio.ontimeupdate = () => {
-            if (audio && audio.duration && !isNaN(audio.duration)) {
+            if (audio && audio.duration && isFinite(audio.duration) && audio.duration > 0) {
               setAudioProgress(prev => ({
                 ...prev,
                 [messageId]: (audio!.currentTime / audio!.duration) * 100
@@ -940,12 +941,11 @@ export default function Conversas() {
     setCreatingConversation(true);
     try {
       // 1. Check if lead exists using Secure RPC (bypasses RLS visibility)
-      const { data: checkData, error: checkError } = await supabase
-        .rpc('check_lead_status', { phone_number: phone });
+      const { data: checkData, error: checkError } = await (supabase.rpc as any)('check_lead_status', { phone_number: phone });
 
       if (checkError) throw checkError;
 
-      const result = checkData as { exists: boolean; lead_id?: string; assigned_to_name?: string };
+      const result = checkData as unknown as { exists: boolean; lead_id?: string; assigned_to_name?: string };
 
       if (result.exists && result.lead_id) {
         // 2. Lead exists. Can we see it? (RLS check)

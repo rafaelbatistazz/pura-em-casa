@@ -162,6 +162,21 @@ serve(async (req: Request) => {
         timestamp: messageTimestamp
       });
 
+      // 0. Deduplication - Check if message already exists (avoid duplicates EARLY)
+      const { data: existingMessages } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('whatsapp_id', messageId) // Match exactly by WhatsApp ID
+        .limit(1);
+
+      if (existingMessages && existingMessages.length > 0) {
+        console.log('Duplicate message detected (early check), skipping');
+        return new Response(
+          JSON.stringify({ success: true, message: 'Duplicate skipped' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
       // 1. Upsert lead (create or update)
       const { data: leadId, error: leadError } = await supabase
         .rpc('upsert_lead_from_webhook', {
@@ -201,11 +216,11 @@ serve(async (req: Request) => {
 
             while (retryCount < maxRetries && !success) {
               if (retryCount > 0) {
-                const waitTime = retryCount * 5000;
+                const waitTime = retryCount * 2000; // Even faster retries (2s, 4s)
                 console.log(`Retry ${retryCount}: Waiting ${waitTime / 1000}s...`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
               } else {
-                await new Promise(resolve => setTimeout(resolve, 3000)); // Initial wait
+                await new Promise(resolve => setTimeout(resolve, 500)); // Minimal initial wait
               }
 
               try {
@@ -234,9 +249,13 @@ serve(async (req: Request) => {
 
             if (success && respData) {
               const base64 = respData.base64;
-              const binaryString = atob(base64);
-              const bytes = new Uint8Array(binaryString.length);
-              for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+              // Safer base64 to Uint8Array conversion for Deno
+              const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+              console.log(`Successfully converted media to bytes. Size: ${bytes.length} bytes`);
+
+              if (bytes.length < 100) {
+                console.warn('Media bytes suspiciously small, might be corrupt.');
+              }
 
               let bucket = 'chat-media';
               let ext = 'jpg';
@@ -286,20 +305,7 @@ serve(async (req: Request) => {
 
       console.log('Lead upserted with ID:', leadId);
 
-      // 2. Check if message already exists (avoid duplicates)
-      const { data: existingMessages } = await supabase
-        .from('messages')
-        .select('id')
-        .eq('whatsapp_id', messageId) // Match exactly by WhatsApp ID
-        .limit(1);
-
-      if (existingMessages && existingMessages.length > 0) {
-        console.log('Duplicate message detected, skipping');
-        return new Response(
-          JSON.stringify({ success: true, message: 'Duplicate skipped' }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
+      // (Deduplication moved to start)
 
       // 3. Insert message with media info
       const { error: messageError } = await supabase
