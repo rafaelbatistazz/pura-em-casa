@@ -192,49 +192,79 @@ serve(async (req: Request) => {
           const instanceName = body.instance;
 
           if (evolutionUrl && evolutionKey && instanceName) {
-            const response = await fetch(`${evolutionUrl}/chat/getBase64FromMediaMessage/${instanceName}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
-              body: JSON.stringify({ message: { key: { id: data.key.id } } })
-            });
+            // Start retry loop for media fetch
+            let retryCount = 0;
+            const maxRetries = 3;
+            let success = false;
+            let lastError = null;
+            let respData = null;
 
-            if (response.ok) {
-              const respJson = await response.json();
-              const base64 = respJson.base64;
-              if (base64) {
-                const binaryString = atob(base64);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+            while (retryCount < maxRetries && !success) {
+              if (retryCount > 0) {
+                const waitTime = retryCount * 5000;
+                console.log(`Retry ${retryCount}: Waiting ${waitTime / 1000}s...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+              } else {
+                await new Promise(resolve => setTimeout(resolve, 3000)); // Initial wait
+              }
 
-                let bucket = 'chat-media';
-                let ext = 'jpg';
-                let mime = 'image/jpeg';
+              try {
+                const res = await fetch(`${evolutionUrl}/chat/getBase64FromMediaMessage/${instanceName}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+                  body: JSON.stringify({ key: data.key })
+                });
 
-                if (mediaType === 'video') { ext = 'mp4'; mime = 'video/mp4'; }
-                else if (mediaType === 'audio') {
-                  ext = 'mp3';
-                  mime = 'audio/mpeg';
+                if (res.ok) {
+                  const json = await res.json();
+                  if (json.base64) {
+                    respData = json;
+                    success = true;
+                  } else {
+                    lastError = { error: 'No base64', resp: json };
+                  }
+                } else {
+                  lastError = { status: res.status, body: await res.text() };
                 }
-                else if (mediaType === 'document') { ext = 'pdf'; mime = 'application/pdf'; }
+              } catch (e) {
+                lastError = { error: 'Fetch Exception', message: e.message };
+              }
+              retryCount++;
+            }
 
-                const fileName = `${messageId}.${ext}`;
-                const filePath = `${leadId}/${fileName}`;
+            if (success && respData) {
+              const base64 = respData.base64;
+              const binaryString = atob(base64);
+              const bytes = new Uint8Array(binaryString.length);
+              for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
 
-                const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, bytes, { contentType: mime, upsert: true });
+              let bucket = 'chat-media';
+              let ext = 'jpg';
+              let mime = 'image/jpeg';
 
-                if (uploadError) console.error('Supabase Storage Upload Error:', uploadError);
-                else {
-                  const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(filePath);
-                  finalMediaUrl = publicUrlData.publicUrl;
-                  console.log('Media uploaded successfully:', finalMediaUrl);
-                }
-              } else console.error('Evolution API returned no base64:', respJson);
+              if (mediaType === 'video') { ext = 'mp4'; mime = 'video/mp4'; }
+              else if (mediaType === 'audio') {
+                ext = 'ogg'; // WhatsApp native format
+                mime = 'audio/ogg';
+              }
+              else if (mediaType === 'document') { ext = 'pdf'; mime = 'application/pdf'; }
+
+              const fileName = `${messageId}.${ext}`;
+              const filePath = `${leadId}/${fileName}`;
+
+              const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, bytes, { contentType: mime, upsert: true });
+
+              if (uploadError) console.error('Supabase Storage Upload Error:', uploadError);
+              else {
+                const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(filePath);
+                finalMediaUrl = publicUrlData.publicUrl;
+                console.log('Media uploaded successfully:', finalMediaUrl);
+              }
             } else {
-              const errorText = await response.text();
-              console.error('Evolution API Error:', errorText);
+              console.error('Media download failed after all retries');
               await supabase.from('debug_events').insert({
                 event_type: 'media_download_error',
-                payload: { error: 'Evolution API Error', status: response.status, body: errorText, messageId }
+                payload: { error: 'Evolution API Maximum Retries Reached', lastError, messageId }
               });
             }
           } else {
@@ -260,11 +290,7 @@ serve(async (req: Request) => {
       const { data: existingMessages } = await supabase
         .from('messages')
         .select('id')
-        .eq('lead_id', leadId)
-        .eq('phone', phone)
-        .eq('message_text', messageText)
-        .eq('direction', direction)
-        .gte('timestamp', new Date(Date.now() - 60000).toISOString()) // Within last minute
+        .eq('whatsapp_id', messageId) // Match exactly by WhatsApp ID
         .limit(1);
 
       if (existingMessages && existingMessages.length > 0) {
@@ -281,6 +307,7 @@ serve(async (req: Request) => {
         .insert({
           lead_id: leadId,
           phone: phone,
+          whatsapp_id: messageId, // Save the WhatsApp message ID
           message_text: messageText,
           media_url: finalMediaUrl,
           media_type: finalMediaType,

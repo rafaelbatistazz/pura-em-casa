@@ -41,6 +41,7 @@ export interface Message {
   id: string;
   lead_id: string;
   phone: string;
+  whatsapp_id: string | null;
   message_text: string;
   media_url: string | null;
   media_type: MediaType;
@@ -175,6 +176,7 @@ export interface Database {
         Insert: {
           lead_id: string;
           phone: string;
+          whatsapp_id?: string | null;
           message_text: string;
           media_url?: string | null;
           direction: MessageDirection;
@@ -185,6 +187,7 @@ export interface Database {
         Update: {
           lead_id?: string;
           phone?: string;
+          whatsapp_id?: string | null;
           message_text?: string;
           media_url?: string | null;
           direction?: MessageDirection;

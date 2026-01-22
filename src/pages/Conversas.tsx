@@ -241,6 +241,7 @@ export default function Conversas() {
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioProgress, setAudioProgress] = useState<{ [key: string]: number }>({});
   const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const isCancelledRef = useRef<boolean>(false);
 
   // Fetch leads with last message and unread count
   const fetchLeads = async () => {
@@ -555,7 +556,9 @@ export default function Conversas() {
       const filePath = `${folder}/${Date.now()}-${fileName}`;
       const { error } = await supabase.storage
         .from('chat-media')
-        .upload(filePath, file);
+        .upload(filePath, file, {
+          contentType: file.type || 'audio/mpeg'
+        });
 
       if (error) throw error;
 
@@ -743,13 +746,34 @@ export default function Conversas() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // Basic mime type detection
-      let mimeType = 'audio/webm';
-      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        mimeType = 'audio/webm;codecs=opus';
-      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-        mimeType = 'audio/mp4';
+      // Basic mime type detection - Let browser pick if it supports it, or use standard fallbacks
+      const mimeTypes = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg'];
+      const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
+
+      console.log('Selected MIME type:', mimeType);
+
+      // Create AudioContext strictly for monitoring
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(stream);
+
+      // Monitor volume for debugging
+      const analyser = audioContext.createAnalyser();
+      source.connect(analyser);
+      analyser.fftSize = 256;
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      // Critical for Mac: Context often starts 'suspended'
+      if (audioContext.state === 'suspended') {
+        console.log('AudioContext suspended, resuming...');
+        await audioContext.resume();
       }
+
+      const checkVolume = setInterval(() => {
+        analyser.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((p, c) => p + c, 0) / dataArray.length;
+        // Log even 0.00 so we know the sensor is active
+        console.log(`[Debug] Mic Status: ${audioContext.state}, Level: ${average.toFixed(2)}`);
+      }, 1000);
 
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
@@ -763,16 +787,28 @@ export default function Conversas() {
       };
 
       mediaRecorder.onstop = async () => {
+        console.log('Recording stopped. Total chunks:', audioChunksRef.current.length);
+        clearInterval(checkVolume);
+        audioContext.close();
+
+        if (isCancelledRef.current) {
+          console.log('Recording was cancelled, skipping upload.');
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+
         // Use the actual mime type from the recorder or the one we selected
         const finalMimeType = mediaRecorder.mimeType || mimeType;
-        const ext = finalMimeType.includes('mp4') ? 'm4a' : 'webm';
+        const ext = finalMimeType.includes('mp4') ? 'm4a' : (finalMimeType.includes('webm') ? 'webm' : 'ogg');
 
         const audioBlob = new Blob(audioChunksRef.current, { type: finalMimeType });
         stream.getTracks().forEach(track => track.stop());
 
-        if (audioBlob.size < 2000) {
-          console.error('Audio blob too small or empty');
-          toast.error('Áudio muito curto ou sem som. Verifique o microfone.');
+        console.log(`Created audio blob: ${audioBlob.size} bytes, type: ${finalMimeType}`);
+
+        if (audioBlob.size < 1000) {
+          console.error('Audio blob too small or empty', audioBlob.size);
+          toast.error('O áudio parece estar sem som. Por favor, verifique se seu microfone está funcionando e se o volume está alto o suficiente.');
           return;
         }
 
@@ -786,7 +822,10 @@ export default function Conversas() {
         setUploadingMedia(false);
       };
 
-      mediaRecorder.start(1000); // Collect data in 1s chunks
+      isCancelledRef.current = false;
+      // Start immediately but with a small timeslice to ensure data flow
+      mediaRecorder.start(1000);
+
       setIsRecording(true);
       setRecordingTime(0);
 
@@ -800,6 +839,7 @@ export default function Conversas() {
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
+      isCancelledRef.current = false;
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       if (recordingIntervalRef.current) {
@@ -810,7 +850,8 @@ export default function Conversas() {
 
   const cancelRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      isCancelledRef.current = true;
+      mediaRecorderRef.current.stop();
       setIsRecording(false);
       setRecordingTime(0);
       if (recordingIntervalRef.current) {
@@ -828,6 +869,11 @@ export default function Conversas() {
   // Audio player functions
   const toggleAudioPlay = async (messageId: string, audioUrl: string) => {
     try {
+      if (!audioUrl || audioUrl === 'null' || audioUrl === 'undefined' || !audioUrl.startsWith('http')) {
+        toast.error('Áudio ainda não disponível ou inválido');
+        return;
+      }
+
       const currentAudio = audioRefs.current.get(messageId);
 
       if (playingAudioId === messageId && currentAudio) {
@@ -849,10 +895,12 @@ export default function Conversas() {
             setAudioProgress(prev => ({ ...prev, [messageId]: 0 }));
           };
           audio.ontimeupdate = () => {
-            setAudioProgress(prev => ({
-              ...prev,
-              [messageId]: (audio!.currentTime / audio!.duration) * 100
-            }));
+            if (audio && audio.duration && !isNaN(audio.duration)) {
+              setAudioProgress(prev => ({
+                ...prev,
+                [messageId]: (audio!.currentTime / audio!.duration) * 100
+              }));
+            }
           };
           audio.onerror = (e) => {
             console.error('Audio error:', e);
@@ -1683,7 +1731,7 @@ export default function Conversas() {
                     </div>
                   ) : (
                     <div
-                      key={item.message.id}
+                      key={`${item.message.id}-${index}`}
                       className={cn(
                         'flex',
                         item.message.direction === 'outbound' ? 'justify-end' : 'justify-start'
@@ -1757,7 +1805,11 @@ export default function Conversas() {
                 // Recording UI
                 <div className="flex items-center gap-3 bg-secondary rounded-3xl px-4 py-3">
                   <button
-                    onClick={cancelRecording}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      cancelRecording();
+                    }}
                     className="h-10 w-10 rounded-full bg-destructive/20 flex items-center justify-center text-destructive"
                   >
                     <X className="h-5 w-5" />
@@ -1768,7 +1820,11 @@ export default function Conversas() {
                     <span className="text-sm text-muted-foreground">Gravando...</span>
                   </div>
                   <button
-                    onClick={stopRecording}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      stopRecording();
+                    }}
                     className="h-12 w-12 rounded-full bg-primary flex items-center justify-center"
                   >
                     <Square className="h-5 w-5 text-primary-foreground fill-current" />
