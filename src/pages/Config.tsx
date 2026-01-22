@@ -129,6 +129,10 @@ export default function Config() {
   const [savingWebhooks, setSavingWebhooks] = useState(false);
   const [testingWebhook, setTestingWebhook] = useState(false);
 
+  // Default Lead Settings
+  const [defaultAiEnabled, setDefaultAiEnabled] = useState(false);
+  const [defaultFollowupEnabled, setDefaultFollowupEnabled] = useState(false);
+
   // AI Settings
   const [aiSettings, setAiSettings] = useState({
     model: 'gpt-4o-mini',
@@ -536,6 +540,12 @@ Gostaria de agendar um horário conosco? 🤗"
 
       const alertConfig = configsData.find(c => c.key === 'alert_notification_phone');
       if (alertConfig) setAlertPhone(JSON.parse(alertConfig.value || '""'));
+
+      // Fetch Default Settings
+      const defAi = configsData.find(c => c.key === 'default_ai_enabled')?.value === 'true';
+      const defFollow = configsData.find(c => c.key === 'default_followup_enabled')?.value === 'true';
+      setDefaultAiEnabled(defAi);
+      setDefaultFollowupEnabled(defFollow);
     }
 
     // 2. Fetch ALL Instances
@@ -639,6 +649,36 @@ Gostaria de agendar um horário conosco? 🤗"
       console.error('Error in fetchDistributionUsers:', error);
     }
   }, []);
+
+  const handleToggleDefaultAi = async (enabled: boolean) => {
+    try {
+      const { error } = await supabase
+        .from('system_config')
+        .upsert({ key: 'default_ai_enabled', value: String(enabled), description: 'IA ativa por padrão em novos leads' });
+
+      if (error) throw error;
+      setDefaultAiEnabled(enabled);
+      toast.success(`IA padrão para novos leads: ${enabled ? 'ATIVADA' : 'DESATIVADA'}`);
+    } catch (error) {
+      console.error('Error toggling default AI:', error);
+      toast.error('Erro ao salvar configuração');
+    }
+  };
+
+  const handleToggleDefaultFollowup = async (enabled: boolean) => {
+    try {
+      const { error } = await supabase
+        .from('system_config')
+        .upsert({ key: 'default_followup_enabled', value: String(enabled), description: 'Follow-up ativo por padrão em novos leads' });
+
+      if (error) throw error;
+      setDefaultFollowupEnabled(enabled);
+      toast.success(`Follow-up padrão para novos leads: ${enabled ? 'ATIVADO' : 'DESATIVADO'}`);
+    } catch (error) {
+      console.error('Error toggling default Follow-up:', error);
+      toast.error('Erro ao salvar configuração');
+    }
+  };
 
   const handleToggleDistribution = async (enabled: boolean) => {
     if (!distributionConfigId) {
@@ -1974,6 +2014,48 @@ Gostaria de agendar um horário conosco? 🤗"
                       )}
                     </div>
                   )}
+                </CardContent>
+              </Card>
+
+              {/* New Lead Settings */}
+              <Card className="border-border bg-card">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Bot className="h-5 w-5" />
+                    Configurações de Novos Leads
+                  </CardTitle>
+                  <CardDescription>
+                    Defina o comportamento padrão para novos leads recebidos
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/30">
+                    <div className="space-y-0.5">
+                      <Label className="text-base font-medium">IA Ativa em Novos Leads</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Se ativo, a IA responderá automaticamente a todos os novos leads.
+                        <br />
+                        <span className="text-yellow-500 font-medium">Recomendado: Desativado para testes</span>
+                      </p>
+                    </div>
+                    <Switch
+                      checked={defaultAiEnabled}
+                      onCheckedChange={handleToggleDefaultAi}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/30">
+                    <div className="space-y-0.5">
+                      <Label className="text-base font-medium">Follow-up Ativo em Novos Leads</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Se ativo, o sistema enviará mensagens de follow-up automáticas.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={defaultFollowupEnabled}
+                      onCheckedChange={handleToggleDefaultFollowup}
+                    />
+                  </div>
                 </CardContent>
               </Card>
 

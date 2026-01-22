@@ -1,7 +1,8 @@
 
-import { createClient } from "jsr:@supabase/supabase-js@2.46.1";
-import OpenAI from "npm:openai@4.71.1";
-import pdf from "npm:pdf-parse@1.1.1";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import OpenAI from "https://esm.sh/openai@4.71.1";
+// import pdf from "npm:pdf-parse@1.1.1";
+// import { Buffer } from "node:buffer";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -9,47 +10,50 @@ const corsHeaders = {
 };
 
 async function transcribeAudio(mediaUrl: string, apiKey: string): Promise<string> {
-    console.log('Transcribing audio from:', mediaUrl);
+    console.log('🗣️ Transcribing audio:', mediaUrl);
     try {
-        const fileResponse = await fetch(mediaUrl);
-        if (!fileResponse.ok) throw new Error('Failed to download audio file');
-        const blob = await fileResponse.blob();
+        // 1. Download do áudio
+        const audioResp = await fetch(mediaUrl);
+        if (!audioResp.ok) throw new Error('Failed to fetch audio');
+        const audioBlob = await audioResp.blob();
 
-        const file = new File([blob], 'audio.ogg', { type: blob.type || 'audio/ogg' });
+        // 2. Preparar FormData (Nativo Deno)
+        const formData = new FormData();
+        // Importante: Whisper requer nome do arquivo com extensão para saber formato
+        formData.append('file', audioBlob, 'audio.ogg');
+        formData.append('model', 'whisper-1');
+        formData.append('language', 'pt');
 
-        const openai = new OpenAI({ apiKey });
-        const transcription = await openai.audio.transcriptions.create({
-            file: file,
-            model: 'whisper-1',
-            language: 'pt',
+        // 3. Request direto OpenAI
+        const openaiResp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`
+                // Não setar Content-Type! Fetch seta automaticamente com boundary para multipart
+            },
+            body: formData
         });
 
-        console.log('Transcription result:', transcription.text);
-        return transcription.text || '[Áudio inaudível]';
-    } catch (e) {
-        console.error('Transcription failed:', e);
-        return '[Erro na transcrição do áudio]';
+        if (!openaiResp.ok) {
+            const err = await openaiResp.text();
+            throw new Error(`OpenAI API Error: ${err}`);
+        }
+
+        const data = await openaiResp.json();
+        console.log('✅ Transcription:', data.text);
+        return data.text;
+
+    } catch (e: any) {
+        console.error('❌ Audio transcription failed:', e);
+        return '[Erro ao processar áudio do cliente]';
     }
 }
 
 async function extractPdfText(mediaUrl: string): Promise<string> {
-    console.log('Extracting PDF text from:', mediaUrl);
-    try {
-        const fileResponse = await fetch(mediaUrl);
-        if (!fileResponse.ok) throw new Error('Failed to download PDF file');
-        const arrayBuffer = await fileResponse.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-
-        const data = await pdf(buffer);
-        console.log('PDF extracted, length:', data.text.length);
-
-        // Limit text to avoid token limits (e.g., first 10k chars)
-        const text = data.text.trim();
-        return text.slice(0, 15000) || '[PDF sem texto extraível]';
-    } catch (e) {
-        console.error('PDF extraction failed:', e);
-        return '[Erro na leitura do PDF (pode ser imagem/escaneado)]';
-    }
+    console.log('PDF received (Fallback Mode):', mediaUrl);
+    // Return a message that includes the link so the AI knows about it.
+    // We avoid extraction to prevent crashes until a safe method is implemented.
+    return `[Arquivo PDF recebido: ${mediaUrl} - Conteúdo não extraído, peça detalhes ao cliente se necessário]`;
 }
 
 const DEFAULT_SYSTEM_PROMPT = `# SISTEMA DE ATENDIMENTO - TAMIRES | PURA EM CASA
@@ -339,9 +343,25 @@ Deno.serve(async (req) => {
         return new Response('ok', { headers: corsHeaders });
     }
 
+    // --- INJECTED DEBUG LOG ---
+    try {
+        const _debugClient = createClient(
+            Deno.env.get('SUPABASE_URL') ?? '',
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+        );
+        await _debugClient.from('debug_events').insert({
+            event_type: 'ai_function_start',
+            payload: { timestamp: new Date().toISOString() }
+        });
+    } catch (e) { console.error('Debug log failed', e); }
+    // --------------------------
+
     try {
         const requestData = await req.json();
         const { leadId, instanceName: inputInstanceName, message_id: msgIdInput } = requestData;
+
+        // Log ID for debugging
+        console.log(`Processing leadId: ${leadId}`);
 
         const messageId = msgIdInput || requestData.messageId;
 
@@ -349,27 +369,15 @@ Deno.serve(async (req) => {
         const mediaUrl = requestData.media_url || requestData.mediaUrl || '';
         let mediaType = requestData.media_type || requestData.mediaType || 'text';
 
-        // DEBUG: Log incoming payload to verify Evolution API structure
-        console.log(`🔍 INPUT DEBUG: Payload keys: ${Object.keys(requestData).join(', ')}`);
-        console.log(`🔍 MEDIA DEBUG: Type=${mediaType}, URL=${mediaUrl ? 'YES' : 'NO'}`);
-        if (requestData.messageType) console.log(`🔍 MSG TYPE: ${requestData.messageType}`);
-
-
-        // Auto-detect PDF via extension if mediaType is generic 'document' or 'file'
-        if (mediaUrl && mediaUrl.toLowerCase().includes('.pdf')) {
-            mediaType = 'document';
+        // Validation only if NO content (but wait, json parsing might have failed earlier?)
+        if (!leadId) {
+            throw new Error('leadId is required');
         }
 
-        // 1. Initialize Supabase Client with Service Role Key (Admin Access)
-        // AI acts as a system agent, so we bypass RLS to ensure we can read all messages/configs.
         const supabaseClient = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         );
-
-        if (!leadId) {
-            throw new Error('leadId is required');
-        }
 
         const apiKey = Deno.env.get('OPENAI_API_KEY');
         if (!apiKey) throw new Error('OPENAI_API_KEY is not set');
@@ -385,8 +393,8 @@ Deno.serve(async (req) => {
         }
         // 2. PDF Document
         else if (mediaType === 'document' && mediaUrl) {
-            const pdfText = await extractPdfText(mediaUrl);
-            messageText = `[Conteúdo do Arquivo PDF]: \n${pdfText} `;
+            const pdfInfo = await extractPdfText(mediaUrl);
+            messageText = `[Sistema]: ${pdfInfo} `;
             currentMessageContent = messageText;
         }
         // 3. Image (Vision)
@@ -507,6 +515,9 @@ PROTOCOLO DE VISÃO & INTELIGÊNCIA (OLHOS DA TAMIRES):
    - Se for "TEXT": O USUÁRIO NÃO MANDOU FOTO.
      -> Ação: Se ele mandou "Oi", "Tudo bem?" ou texto aleatório, RESPONDA ao texto primeiro com simpatia. (Ex: "Tudo ótimo! ✨").
      -> SÓ DEPOIS reforce o pedido da foto. NÃO finja que recebeu foto.
+   - Se for "AUDIO": O USUÁRIO MANDOU ÁUDIO.
+     -> Ação: Leia a transcrição. Se for "[Erro...]" ou inaudível, peça desculpas e peça para escrever ou mandar foto.
+     -> NÃO DIGA "Obrigado pela foto" se for AUDIO.
    - Se for "IMAGE": O cliente mandou foto. Prossiga para item 2.
 
 2. ANÁLISE CRÍTICA (SOMENTE SE TIPO = IMAGE):
@@ -809,8 +820,8 @@ IMPORTANTÍSSIMO SOBRE DATAS E AGENDAMENTO:
                     // Use JID format to match frontend/Evolution expectations
                     const targetNumber = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
 
-                    // Random delay between 4000ms and 9000ms is passed to Evolution API
-                    const textDelay = Math.floor(Math.random() * (9000 - 4000 + 1) + 4000);
+                    // Random delay between 2000ms and 5000ms is passed to Evolution API
+                    const textDelay = Math.floor(Math.random() * (5000 - 2000 + 1) + 2000);
 
                     console.log(`⏳ Sending Text Part with Delay: ${textDelay}ms | Content: ${part.substring(0, 20)}...`);
 
@@ -890,8 +901,8 @@ IMPORTANTÍSSIMO SOBRE DATAS E AGENDAMENTO:
                                 const cleanPhone = leadData.phone.replace(/\D/g, '');
                                 const targetNumber = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
 
-                                // RANDOM DELAY 4s - 8s (Humanization)
-                                const mediaDelay = Math.floor(Math.random() * (8000 - 4000 + 1) + 4000);
+                                // RANDOM DELAY 2s - 5s (Humanization - Reduced)
+                                const mediaDelay = Math.floor(Math.random() * (5000 - 2000 + 1) + 2000);
 
                                 await new Promise(resolve => setTimeout(resolve, mediaDelay));
 
@@ -1056,6 +1067,17 @@ IMPORTANTÍSSIMO SOBRE DATAS E AGENDAMENTO:
             executionLog.actions.push(stepLog);
         }
 
+        // --- COMPLETED LOG ---
+        try {
+            await supabaseClient.from('debug_events').insert({
+                event_type: 'ai_function_completion',
+                payload: { steps: loopIterations, status: 'completed' }
+            });
+        } catch (e) {
+            console.error('Failed to log completion', e);
+        }
+        // ---------------------
+
         return new Response(JSON.stringify({
             status: 'completed',
             steps: loopIterations,
@@ -1066,6 +1088,19 @@ IMPORTANTÍSSIMO SOBRE DATAS E AGENDAMENTO:
 
     } catch (error: any) {
         console.error('AI Function Error:', error);
+
+        // --- ERROR LOG ---
+        try {
+            // Re-instantiate locally if checking "supabaseClient" reference might fail if error happened before init
+            // But we assume it is consistent here.
+            /*
+            await supabaseClient.from('debug_events').insert({
+                event_type: 'ai_function_error',
+                payload: { error: error.message }
+            });
+            */
+        } catch (e) { }
+
         return new Response(JSON.stringify({ error: error.message || String(error) }), {
             status: 500,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },

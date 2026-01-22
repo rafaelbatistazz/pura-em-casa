@@ -212,9 +212,6 @@ serve(async (req: Request) => {
 
                 if (mediaType === 'video') { ext = 'mp4'; mime = 'video/mp4'; }
                 else if (mediaType === 'audio') {
-                  // WhatsApp usually sends OGG/Opus. We'll save as mp3/ogg to be safe or keep original? 
-                  // Let's stick to a generic extension or try to interpret content type if possible.
-                  // For now, let's fix the bucket and assume mp3/ogg compatibility.
                   ext = 'mp3';
                   mime = 'audio/mpeg';
                 }
@@ -232,9 +229,28 @@ serve(async (req: Request) => {
                   console.log('Media uploaded successfully:', finalMediaUrl);
                 }
               } else console.error('Evolution API returned no base64:', respJson);
-            } else console.error('Evolution API Error:', await response.text());
-          } else console.warn('Missing Evolution config (URL/KEY/Instance), skipping media download.');
-        } catch (err) { console.error('Unexpected error handling media:', err); }
+            } else {
+              const errorText = await response.text();
+              console.error('Evolution API Error:', errorText);
+              await supabase.from('debug_events').insert({
+                event_type: 'media_download_error',
+                payload: { error: 'Evolution API Error', status: response.status, body: errorText, messageId }
+              });
+            }
+          } else {
+            console.warn('Missing Evolution config (URL/KEY/Instance), skipping media download.');
+            await supabase.from('debug_events').insert({
+              event_type: 'media_download_skipped',
+              payload: { error: 'Missing Config', evolutionUrl: !!evolutionUrl, evolutionKey: !!evolutionKey, instanceName: !!instanceName, messageId }
+            });
+          }
+        } catch (err: any) {
+          console.error('Unexpected error handling media:', err);
+          await supabase.from('debug_events').insert({
+            event_type: 'media_download_exception',
+            payload: { error: err.message, stack: err.stack, messageId }
+          });
+        }
       }
       // ----------------------------------------------------------------
 
@@ -299,6 +315,8 @@ serve(async (req: Request) => {
       console.log(`Connection update for ${body.instance}: ${status}`);
 
       // Trigger n8n webhook on connection success
+      // REMOVED: N8N dependency eliminated - status is already updated in DB below
+      /* 
       if (status === 'open' || status === 'connected') {
         try {
           const instanceName = body.instance;
@@ -321,6 +339,7 @@ serve(async (req: Request) => {
           console.error('Failed to trigger n8n webhook:', err);
         }
       }
+      */
 
       // Update instances table in Supabase to reflect real-time status
       let dbStatus = 'disconnected';

@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { normalizePhone, maskPhone } from '@/lib/phoneUtils';
 import { cn, getSaoPauloTimestamp } from '@/lib/utils';
+import { useNavigate } from 'react-router-dom';
 
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -98,6 +99,7 @@ interface LeadWithMessages extends Lead {
 
 export default function Conversas() {
   const { user, role } = useAuth();
+  const navigate = useNavigate();
 
   // Helper to display phone
   const displayPhone = (phone: string, assignedTo?: string | null) => {
@@ -181,7 +183,7 @@ export default function Conversas() {
 
     const { error } = await supabase
       .from('leads')
-      .update({ ...updates, updated_at: getSaoPauloTimestamp() } as never)
+      .update({ ...updates, updated_at: new Date().toISOString() } as never)
       .eq('id', selectedLead.id);
 
     if (error) {
@@ -229,12 +231,15 @@ export default function Conversas() {
       toast.success('Lead excluído');
       setSelectedLead(null);
       setDetailsOpen(false);
+      setShowMobileChat(false); // Close mobile chat if open
+      navigate('/chat'); // Redirect to conversations page
       fetchLeads();
     }
   };
 
   // Audio player states
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [audioProgress, setAudioProgress] = useState<{ [key: string]: number }>({});
   const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
 
   // Fetch leads with last message and unread count
@@ -546,7 +551,8 @@ export default function Conversas() {
 
   const uploadMediaToStorage = async (file: Blob, fileName: string): Promise<string | null> => {
     try {
-      const filePath = `${selectedLead?.phone}/${Date.now()}-${fileName}`;
+      const folder = selectedLead?.id || 'unknown';
+      const filePath = `${folder}/${Date.now()}-${fileName}`;
       const { error } = await supabase.storage
         .from('chat-media')
         .upload(filePath, file);
@@ -736,20 +742,42 @@ export default function Conversas() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+
+      // Basic mime type detection
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (e) => {
-        audioChunksRef.current.push(e.data);
+        if (e.data && e.data.size > 0) {
+          console.log(`Audio chunk received: ${e.data.size} bytes`);
+          audioChunksRef.current.push(e.data);
+        }
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Use the actual mime type from the recorder or the one we selected
+        const finalMimeType = mediaRecorder.mimeType || mimeType;
+        const ext = finalMimeType.includes('mp4') ? 'm4a' : 'webm';
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: finalMimeType });
         stream.getTracks().forEach(track => track.stop());
 
+        if (audioBlob.size < 2000) {
+          console.error('Audio blob too small or empty');
+          toast.error('Áudio muito curto ou sem som. Verifique o microfone.');
+          return;
+        }
+
         setUploadingMedia(true);
-        const mediaUrl = await uploadMediaToStorage(audioBlob, 'audio.webm');
+        const mediaUrl = await uploadMediaToStorage(audioBlob, `audio.${ext}`);
         if (mediaUrl) {
           await sendMessage('', mediaUrl, 'audio');
         } else {
@@ -758,7 +786,7 @@ export default function Conversas() {
         setUploadingMedia(false);
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(1000); // Collect data in 1s chunks
       setIsRecording(true);
       setRecordingTime(0);
 
@@ -798,27 +826,52 @@ export default function Conversas() {
   };
 
   // Audio player functions
-  const toggleAudioPlay = (messageId: string, audioUrl: string) => {
-    const currentAudio = audioRefs.current.get(messageId);
+  const toggleAudioPlay = async (messageId: string, audioUrl: string) => {
+    try {
+      const currentAudio = audioRefs.current.get(messageId);
 
-    if (playingAudioId === messageId && currentAudio) {
-      currentAudio.pause();
+      if (playingAudioId === messageId && currentAudio) {
+        currentAudio.pause();
+        setPlayingAudioId(null);
+      } else {
+        // Pause any currently playing audio
+        if (playingAudioId) {
+          const prevAudio = audioRefs.current.get(playingAudioId);
+          if (prevAudio) prevAudio.pause();
+        }
+
+        let audio = currentAudio;
+        if (!audio) {
+          console.log('Creating new Audio element for:', audioUrl);
+          audio = new Audio(audioUrl);
+          audio.onended = () => {
+            setPlayingAudioId(null);
+            setAudioProgress(prev => ({ ...prev, [messageId]: 0 }));
+          };
+          audio.ontimeupdate = () => {
+            setAudioProgress(prev => ({
+              ...prev,
+              [messageId]: (audio!.currentTime / audio!.duration) * 100
+            }));
+          };
+          audio.onerror = (e) => {
+            console.error('Audio error:', e);
+            toast.error('Erro ao reproduzir áudio');
+            setPlayingAudioId(null);
+            setAudioProgress(prev => ({ ...prev, [messageId]: 0 }));
+          };
+          audioRefs.current.set(messageId, audio);
+        }
+
+        console.log('Attempting to play audio:', audioUrl);
+        await audio.play();
+        setPlayingAudioId(messageId);
+        console.log('Audio playing successfully');
+      }
+    } catch (error) {
+      console.error('Error playing audio:', error);
+      toast.error('Não foi possível reproduzir o áudio');
       setPlayingAudioId(null);
-    } else {
-      // Pause any currently playing audio
-      if (playingAudioId) {
-        const prevAudio = audioRefs.current.get(playingAudioId);
-        if (prevAudio) prevAudio.pause();
-      }
-
-      let audio = currentAudio;
-      if (!audio) {
-        audio = new Audio(audioUrl);
-        audio.onended = () => setPlayingAudioId(null);
-        audioRefs.current.set(messageId, audio);
-      }
-      audio.play();
-      setPlayingAudioId(messageId);
     }
   };
 
@@ -1002,7 +1055,7 @@ export default function Conversas() {
 
       const { error } = await supabase
         .from('leads')
-        .update({ ...updateData, updated_at: getSaoPauloTimestamp() } as never)
+        .update({ ...updateData, updated_at: new Date().toISOString() } as never)
         .eq('id', selectedLead.id);
 
       if (error) throw error;
@@ -1188,7 +1241,10 @@ export default function Conversas() {
             )}
           </button>
           <div className="flex-1 h-1 bg-muted-foreground/30 rounded-full">
-            <div className="h-full w-0 bg-primary rounded-full transition-all" />
+            <div
+              className="h-full bg-primary rounded-full transition-all"
+              style={{ width: `${audioProgress[message.id] || 0}%` }}
+            />
           </div>
         </div>
       );
@@ -1643,11 +1699,12 @@ export default function Conversas() {
                         )}
                         style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
                       >
-                        {item.message.direction === 'inbound' && item.message.sender_name !== selectedLead.name && (
+                        {/* Removed sender_name display - was showing WhatsApp contact names */}
+                        {/* {item.message.direction === 'inbound' && item.message.sender_name !== selectedLead.name && (
                           <p className="text-xs font-medium text-primary mb-1">
                             {item.message.sender_name}
                           </p>
-                        )}
+                        )} */}
 
                         {/* Media content */}
                         {renderMediaContent(item.message)}
