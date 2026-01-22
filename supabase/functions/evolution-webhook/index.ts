@@ -227,7 +227,15 @@ serve(async (req: Request) => {
                 const res = await fetch(`${evolutionUrl}/chat/getBase64FromMediaMessage/${instanceName}`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
-                  body: JSON.stringify({ key: data.key })
+                  body: JSON.stringify({
+                    message: {
+                      key: {
+                        id: data.key.id,
+                        remoteJid: data.key.remoteJid,
+                        fromMe: data.key.fromMe
+                      }
+                    }
+                  })
                 });
 
                 if (res.ok) {
@@ -263,8 +271,8 @@ serve(async (req: Request) => {
 
               if (mediaType === 'video') { ext = 'mp4'; mime = 'video/mp4'; }
               else if (mediaType === 'audio') {
-                ext = 'ogg'; // WhatsApp native format
-                mime = 'audio/ogg';
+                ext = 'mp3'; // User requested mp3 extension
+                mime = 'audio/mpeg';
               }
               else if (mediaType === 'document') { ext = 'pdf'; mime = 'application/pdf'; }
 
