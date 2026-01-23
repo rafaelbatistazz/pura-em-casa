@@ -1345,6 +1345,14 @@ export default function Conversas() {
     }
 
     if (message.media_type === 'video') {
+      if (!message.media_url) {
+        return (
+          <div className="flex items-center gap-2 bg-background/20 rounded-lg p-4 animate-pulse">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <span className="text-xs text-muted-foreground italic">Baixando vídeo...</span>
+          </div>
+        );
+      }
       return (
         <video
           src={message.media_url}
@@ -1356,6 +1364,14 @@ export default function Conversas() {
     }
 
     if (message.media_type === 'document') {
+      if (!message.media_url) {
+        return (
+          <div className="flex items-center gap-2 bg-background/20 rounded-lg p-4 animate-pulse">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <span className="text-xs text-muted-foreground italic">Baixando arquivo...</span>
+          </div>
+        );
+      }
       return (
         <a
           href={message.media_url}
@@ -1366,6 +1382,26 @@ export default function Conversas() {
           <FileText className="h-5 w-5" />
           <span className="text-sm underline">Abrir documento</span>
         </a>
+      );
+    }
+
+    if (message.media_type === 'sticker') {
+      if (!message.media_url) {
+        return (
+          <div className="flex items-center gap-2 bg-background/20 rounded-lg p-2 animate-pulse">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        );
+      }
+      return (
+        <div className="max-w-[120px] rounded-lg overflow-hidden">
+          <img
+            src={message.media_url}
+            alt="Sticker"
+            className="w-full h-auto"
+            loading="lazy"
+          />
+        </div>
       );
     }
     return null;

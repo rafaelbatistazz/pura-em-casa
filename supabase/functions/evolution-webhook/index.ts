@@ -264,6 +264,7 @@ serve(async (req: Request) => {
                 mime = 'audio/mpeg';
               }
               else if (mediaType === 'document') { ext = 'pdf'; mime = 'application/pdf'; }
+              else if (mediaType === 'sticker') { ext = 'webp'; mime = 'image/webp'; }
 
               const fileName = `${messageId}.${ext}`;
               const filePath = `${leadId}/${fileName}`;
