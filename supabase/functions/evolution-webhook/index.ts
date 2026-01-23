@@ -202,127 +202,107 @@ serve(async (req: Request) => {
 
       // (Deduplication moved to start)
 
-      // 3. Insert message IMMEDIATELY to avoid delay in UI
-      // We insert without media_url first, then update it later after download
-      const { data: insertedMsg, error: messageError } = await supabase
+      // --- MEDIA HANDLING (Synchronous to ensure reliability) ---
+      if (mediaType && !finalMediaUrl) {
+        try {
+          console.log(`Attempting to fetch media for message ${messageId} (${mediaType})...`);
+
+          const evolutionUrl = Deno.env.get('EVOLUTION_API_URL');
+          const evolutionKey = Deno.env.get('EVOLUTION_API_KEY');
+          const instanceName = body.instance;
+
+          if (evolutionUrl && evolutionKey && instanceName) {
+            let retryCount = 0;
+            const maxRetries = 3;
+            let success = false;
+            let respData = null;
+
+            while (retryCount < maxRetries && !success) {
+              if (retryCount > 0) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+              } else {
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
+
+              try {
+                // Request structure EXACTLY as shown in n8n screenshot
+                const res = await fetch(`${evolutionUrl}/chat/getBase64FromMediaMessage/${instanceName}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+                  body: JSON.stringify({
+                    message: {
+                      key: {
+                        id: data.key.id
+                      }
+                    }
+                  })
+                });
+
+                if (res.ok) {
+                  const json = await res.json();
+                  if (json.base64) {
+                    respData = json;
+                    success = true;
+                  }
+                }
+              } catch (e) {
+                console.error('Fetch error during media download:', (e as any).message);
+              }
+              retryCount++;
+            }
+
+            if (success && respData) {
+              const base64 = respData.base64;
+              const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+              console.log(`Media size: ${bytes.length} bytes`);
+
+              let ext = 'jpg';
+              let mime = 'image/jpeg';
+              if (mediaType === 'video') { ext = 'mp4'; mime = 'video/mp4'; }
+              else if (mediaType === 'audio') {
+                ext = 'mp3';
+                mime = 'audio/mpeg';
+              }
+              else if (mediaType === 'document') { ext = 'pdf'; mime = 'application/pdf'; }
+
+              const fileName = `${messageId}.${ext}`;
+              const filePath = `${leadId}/${fileName}`;
+
+              const { error: uploadError } = await supabase.storage.from('chat-media').upload(filePath, bytes, { contentType: mime, upsert: true });
+
+              if (uploadError) {
+                console.error('Storage Upload Error:', uploadError);
+              } else {
+                const { data: publicUrlData } = supabase.storage.from('chat-media').getPublicUrl(filePath);
+                finalMediaUrl = publicUrlData.publicUrl;
+                console.log('Media uploaded successfully:', finalMediaUrl);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Media processing failed:', err);
+        }
+      }
+
+      // 3. Insert message
+      const { error: messageError } = await supabase
         .from('messages')
         .insert({
           lead_id: leadId,
           phone: phone,
           whatsapp_id: messageId,
           message_text: messageText,
-          media_url: null, // Initial null
+          media_url: finalMediaUrl,
           media_type: finalMediaType,
           direction: direction,
           sender_name: direction === 'inbound' ? pushName : 'Você',
           timestamp: messageTimestamp,
           read: direction === 'outbound',
-        })
-        .select('id')
-        .single();
+        });
 
       if (messageError) {
         console.error('Error inserting message:', messageError);
         throw messageError;
-      }
-
-      const msgDatabaseId = insertedMsg.id;
-      console.log('Message inserted successfully, ID:', msgDatabaseId);
-
-      // --- MEDIA HANDLING (Background processing - but we must finish before function ends) ---
-      if (mediaType && !finalMediaUrl) {
-        // We do this AFTER insertion to ensure the message is already in the database
-        (async () => {
-          try {
-            console.log(`Attempting to fetch media for message ${messageId} (${mediaType})...`);
-
-            const evolutionUrl = Deno.env.get('EVOLUTION_API_URL');
-            const evolutionKey = Deno.env.get('EVOLUTION_API_KEY');
-            const instanceName = body.instance;
-
-            if (evolutionUrl && evolutionKey && instanceName) {
-              let retryCount = 0;
-              const maxRetries = 3;
-              let success = false;
-              let respData = null;
-
-              while (retryCount < maxRetries && !success) {
-                if (retryCount > 0) {
-                  const waitTime = 2000;
-                  await new Promise(resolve => setTimeout(resolve, waitTime));
-                } else {
-                  await new Promise(resolve => setTimeout(resolve, 500));
-                }
-
-                try {
-                  const res = await fetch(`${evolutionUrl}/chat/getBase64FromMediaMessage/${instanceName}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
-                    body: JSON.stringify({
-                      message: {
-                        key: {
-                          id: data.key.id
-                        }
-                      }
-                    })
-                  });
-
-                  if (res.ok) {
-                    const json = await res.json();
-                    if (json.base64) {
-                      respData = json;
-                      success = true;
-                    }
-                  }
-                } catch (e) {
-                  console.error('Fetch error during media download:', e.message);
-                }
-                retryCount++;
-              }
-
-              if (success && respData) {
-                const base64 = respData.base64;
-                const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-                console.log(`Media size: ${bytes.length} bytes`);
-
-                let ext = 'jpg';
-                let mime = 'image/jpeg';
-                if (mediaType === 'video') { ext = 'mp4'; mime = 'video/mp4'; }
-                else if (mediaType === 'audio') {
-                  ext = 'mp3';
-                  mime = 'audio/mpeg';
-                }
-                else if (mediaType === 'document') { ext = 'pdf'; mime = 'application/pdf'; }
-
-                const fileName = `${messageId}.${ext}`;
-                const filePath = `${leadId}/${fileName}`;
-
-                const { error: uploadError } = await supabase.storage.from('chat-media').upload(filePath, bytes, { contentType: mime, upsert: true });
-
-                if (uploadError) {
-                  console.error('Storage Upload Error:', uploadError);
-                } else {
-                  const { data: publicUrlData } = supabase.storage.from('chat-media').getPublicUrl(filePath);
-                  finalMediaUrl = publicUrlData.publicUrl;
-
-                  // UPDATE THE MESSAGE WITH THE URL
-                  await supabase
-                    .from('messages')
-                    .update({ media_url: finalMediaUrl })
-                    .eq('id', msgDatabaseId);
-
-                  console.log('Message updated with media URL:', finalMediaUrl);
-                }
-              }
-            }
-          } catch (err) {
-            console.error('Background media processing failed:', err);
-          }
-        })();
-        // Note: In Deno/Supabase functions, we should probably await this if we want to be safe,
-        // but to reduce delay for the webhook response, we let it run.
-        // HOWEVER, Supabase functions stay alive for a bit. To be 100% safe against the function
-        // being killed, we'll wait for it here but the MESSAGE is already in the DB.
       }
 
       return new Response(

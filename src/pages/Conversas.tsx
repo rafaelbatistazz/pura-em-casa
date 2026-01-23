@@ -48,7 +48,7 @@ const TIMEZONE = 'America/Sao_Paulo';
 
 
 const EVOLUTION_API_URL = 'https://evo.advfunnel.com.br';
-const EVOLUTION_API_KEY = 'ESWH6B36nhfW3apMfQQAv3SU2CthsZCg';
+const EVOLUTION_API_KEY = 'FCABF009-BA21-47E6-873F-017BD88705E3';
 
 export const statusColors: Record<string, string> = {
   'Oportunidade': 'bg-slate-500/20 text-slate-400',
@@ -1276,6 +1276,14 @@ export default function Conversas() {
     if (!message.media_url) return null;
 
     if (message.media_type === 'audio') {
+      if (!message.media_url) {
+        return (
+          <div className="flex items-center gap-2 min-w-[200px] bg-background/20 rounded-full px-3 py-2 animate-pulse">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <span className="text-xs text-muted-foreground italic">Baixando áudio...</span>
+          </div>
+        );
+      }
       return (
         <div className="flex items-center gap-2 min-w-[200px] bg-background/20 rounded-full px-3 py-2">
           <button
@@ -1299,6 +1307,14 @@ export default function Conversas() {
     }
 
     if (message.media_type === 'image') {
+      if (!message.media_url) {
+        return (
+          <div className="flex items-center gap-2 bg-background/20 rounded-lg p-4 animate-pulse">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <span className="text-xs text-muted-foreground italic">Baixando imagem...</span>
+          </div>
+        );
+      }
       // Proxy WhatsApp URLs to avoid CORS issues
       const mediaUrl = message.media_url || '';
       const imageUrl = mediaUrl.includes('whatsapp.net')
